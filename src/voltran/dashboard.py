@@ -114,7 +114,12 @@ class DashboardView:
             table.add_row("-", "-", "-", "[dim]Olay kaydı bulunmuyor.[/dim]")
         else:
             for event in reversed(events[-6:]):
-                time_str = event.timestamp[-8:] if len(event.timestamp) >= 8 else "-"
+                if "T" in event.timestamp:
+                    time_str = event.timestamp.split("T")[1][:8]
+                elif len(event.timestamp) >= 8:
+                    time_str = event.timestamp[:8]
+                else:
+                    time_str = "-"
                 table.add_row(
                     time_str,
                     event.agent or "sistem",
