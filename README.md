@@ -260,6 +260,9 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] Paketleme ve tek komutluk macOS kurulumu (`scripts/install.sh`)
 - [x] Canlı Terminal İzleme Paneli (TUI Dashboard — `voltran dashboard`)
 
+Detaylı teknik hedefler, mimari riskler ve gelecek sürümler (v0.2.0 - v0.4.0) için [ROADMAP.md](ROADMAP.md) belgesini inceleyin.
+
+
 
 
 
