@@ -211,7 +211,9 @@ class ExecutionEngine:
                 working_dir=working_dir,
                 headless=True,
                 allow_writes=plan.policy.allow_writes,
+                blind_mode=plan.policy.blind_mode,
             )
+
             if len(session.event_names) != len(roles):
                 raise HcomClientError("Başlatılan hcom ajan kimlikleri doğrulanamadı.")
 
@@ -237,8 +239,11 @@ class ExecutionEngine:
 
             executions: list[ProviderExecution] = []
             transcript_parts: list[str] = []
-            for role, subtask in zip(roles, plan.subtasks, strict=True):
+            for index, (role, subtask) in enumerate(
+                zip(roles, plan.subtasks, strict=True), start=1
+            ):
                 transcript = await self.collaboration_runtime.get_transcript(session, role.name)
+
                 event_name = session.event_names[role.name]
                 messages = [
                     event.content
@@ -271,9 +276,12 @@ class ExecutionEngine:
                     )
                 )
                 if participated and summary:
-                    transcript_parts.append(
-                        f"### {subtask.role} ({subtask.assigned_provider})\n{summary}"
+                    header = (
+                        f"### {subtask.role} [Kör Hakem #{index}]\n{summary}"
+                        if plan.policy.blind_mode
+                        else f"### {subtask.role} ({subtask.assigned_provider})\n{summary}"
                     )
+                    transcript_parts.append(header)
 
             consensus_messages = [
                 event.content.replace("VOLTRAN_CONSENSUS", "").strip()

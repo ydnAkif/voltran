@@ -129,11 +129,27 @@ def run(
         float,
         typer.Option(help="Model çalıştırmaları için saniye cinsinden zaman aşımı."),
     ] = 300.0,
+    blind: Annotated[
+        bool,
+        typer.Option("--blind", help="Kör hakemlik: Modellerin marka ve firma kimliklerini gizle."),
+    ] = False,
+    allow_writes: Annotated[
+        bool,
+        typer.Option(
+            "--write",
+            "-w",
+            help=(
+                "Dosya yazma izni: Modellerin görev kapsamındaki dosyalarda "
+                "değişiklik yapmasına izin ver."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Görevi uygun çalışma modu ve modellerle tek raporda yürüt."""
 
     from voltran.commander import Commander
     from voltran.engine import ExecutionEngine
+    from voltran.lock import FileLockManager
     from voltran.reporter import Reporter
     from voltran.router import Router
     from voltran.store import RunStore
@@ -141,6 +157,8 @@ def run(
     commander = Commander()
     plan = commander.create_plan(prompt, mode=mode, context_file=file)
     plan.policy.timeout_seconds = timeout
+    plan.policy.blind_mode = blind
+    plan.policy.allow_writes = allow_writes
 
     router = Router()
     try:
@@ -152,13 +170,25 @@ def run(
     if explain and not json_output:
         console.print(f"[bold cyan]Planlanan Mod:[/bold cyan] {plan.mode.value.upper()}")
         console.print(f"[bold cyan]Seçim Gerekçesi:[/bold cyan] {plan.reasoning}")
+        if plan.policy.blind_mode:
+            console.print("  [magenta]• Kör Hakemlik (Blind Peer Review) devrede.[/magenta]")
+        if plan.policy.allow_writes:
+            console.print("  [yellow]• Dosya Yazma (Write Safety) izni devrede.[/yellow]")
         for st in plan.subtasks:
             provider_tag = f"[green]{st.assigned_provider}[/green]"
             console.print(f"  • [yellow]{st.role}[/yellow] ➔ {provider_tag}: {st.purpose}")
         console.print()
 
-    engine = ExecutionEngine()
-    report = asyncio.run(engine.execute_plan(prompt, plan, dry_run=dry_run))
+    lock_mgr = FileLockManager()
+    if file and allow_writes:
+        lock_mgr.acquire(file, "voltran-orchestrator")
+
+    try:
+        engine = ExecutionEngine()
+        report = asyncio.run(engine.execute_plan(prompt, plan, dry_run=dry_run))
+    finally:
+        if file and allow_writes:
+            lock_mgr.release(file, "voltran-orchestrator")
 
     if not dry_run:
         RunStore().save_report(report)

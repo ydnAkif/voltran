@@ -99,6 +99,7 @@ class ExecutionPolicy(BaseModel):
 
     timeout_seconds: float = Field(default=300.0, ge=0.1, le=3600.0)
     allow_writes: bool = False
+    blind_mode: bool = False
     allowed_tools: tuple[str, ...] = ()
     max_output_chars: int = Field(default=200_000, ge=1_000, le=2_000_000)
 

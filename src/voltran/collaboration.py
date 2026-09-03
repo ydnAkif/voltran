@@ -57,6 +57,7 @@ class CollaborationRuntime:
         working_dir: Path | None = None,
         headless: bool = True,
         allow_writes: bool = False,
+        blind_mode: bool = False,
     ) -> CollaborationSession:
         """Belirtilen roller için ajanları başlatır ve oturumu hazırlar."""
         if not self.is_available():
@@ -87,6 +88,14 @@ class CollaborationRuntime:
                     if not allow_writes
                     else "Yalnızca görev kapsamındaki araçları kullan.\n"
                 )
+                blind_instruction = (
+                    "KÖR HAKEMLİK MODU: Diğer modellerin marka veya model isimlerini "
+                    "(OpenAI, Anthropic, Google vb.) kullanma; tüm katkıları nesnel ve "
+                    "teknik argümanlarla değerlendir. Kendi model kimliğini açıklama.\n"
+                    if blind_mode
+                    else ""
+                )
+
                 system_prompt = (
                     f"Sen VOLTRAN konseyinde bir uzmansın.\n"
                     f"Rolün: {agent_role.role}\n"
@@ -97,6 +106,7 @@ class CollaborationRuntime:
                     "Son karar oluştuğunda VOLTRAN_CONSENSUS; kendi işin bittiğinde "
                     "VOLTRAN_DONE işaretini kullan.\n"
                     f"{restriction}"
+                    f"{blind_instruction}"
                     f"Ortak Görev: {task_prompt}"
                 )
 

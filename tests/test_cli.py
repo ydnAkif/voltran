@@ -79,3 +79,14 @@ def test_history_command() -> None:
     result = runner.invoke(app, ["history"])
 
     assert result.exit_code == 0
+
+
+def test_run_blind_and_write_options() -> None:
+    result = runner.invoke(
+        app,
+        ["run", "Mimariyi karşılaştır", "--dry-run", "--explain", "--blind", "--write"],
+    )
+
+    assert result.exit_code == 0
+    assert "Kör Hakemlik" in result.stdout
+    assert "Dosya Yazma" in result.stdout

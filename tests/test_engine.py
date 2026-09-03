@@ -129,8 +129,9 @@ class _FakeCollaborationRuntime:
         working_dir: Path | None = None,
         headless: bool = True,
         allow_writes: bool = False,
+        blind_mode: bool = False,
     ) -> CollaborationSession:
-        del headless, allow_writes
+        del headless, allow_writes, blind_mode
 
         if self.fail_start:
             raise HcomClientError("başlatma hatası")

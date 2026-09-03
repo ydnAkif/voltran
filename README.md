@@ -202,12 +202,12 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] Canlı çoklu ajan işbirliği motoru (`CollaborationRuntime` + `Supervisor`)
 - [x] Yerel SQLite çalışma geçmişi (`voltran history`)
 - [x] Gizlilik koruması ve veri maskeleme (API key, token, PII)
-- [x] Hata ve zaman aşımı izolasyonu (`--timeout`, süreç iptali)
-- [ ] Kör hakemlik (Anonymized peer review — marka önyargısını önleme)
-- [ ] Dosya kilitleme ve sapma denetimi (File locking & drift detection)
+- [x] Kör hakemlik (Anonymized peer review — `--blind` ile marka önyargısını önleme)
+- [x] Dosya kilitleme ve sapma denetimi (`FileLockManager` ve `--write` ile çakışma önleme)
 - [ ] Görev bazlı değerlendirme seti
 - [ ] Paketleme ve tek komutluk macOS kurulumu
 - [ ] İsteğe bağlı SwiftUI / TUI arayüz
+
 
 ## Resmî teknik dayanaklar
 
