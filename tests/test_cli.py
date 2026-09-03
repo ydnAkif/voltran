@@ -55,3 +55,27 @@ def test_doctor_strict_returns_failure_for_degraded_report(monkeypatch: MonkeyPa
     result = runner.invoke(app, ["doctor", "--strict"])
 
     assert result.exit_code == 1
+
+
+def test_run_dry_run_json() -> None:
+    result = runner.invoke(app, ["run", "Bu kodu incele ve açıkla", "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["task_prompt"] == "Bu kodu incele ve açıkla"
+    assert payload["mode"] in {"quick", "expert", "council"}
+    assert "executions" in payload
+
+
+def test_run_explain() -> None:
+    result = runner.invoke(app, ["run", "Mimariyi karşılaştır", "--dry-run", "--explain"])
+
+    assert result.exit_code == 0
+    assert "Planlanan Mod" in result.stdout
+    assert "Seçim Gerekçesi" in result.stdout
+
+
+def test_history_command() -> None:
+    result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0

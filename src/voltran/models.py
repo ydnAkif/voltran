@@ -110,3 +110,68 @@ class ProviderExecution(BaseModel):
     exit_code: int | None = None
     result: TaskResult | None = None
     error: str | None = None
+
+
+class ExecutionMode(StrEnum):
+    """VOLTRAN çalışma modu."""
+
+    QUICK = "quick"
+    EXPERT = "expert"
+    COUNCIL = "council"
+    VISUAL = "visual"
+
+
+class SubTask(BaseModel):
+    """Plan içindeki tek bir alt görev tanımı."""
+
+    subtask_id: str = Field(default_factory=lambda: uuid4().hex[:8])
+    role: str
+    purpose: str
+    assigned_provider: str | None = None
+    model: str | None = None
+
+
+class TaskPlan(BaseModel):
+    """Komutan ve Router tarafından üretilen makinece doğrulanabilir plan."""
+
+    mode: ExecutionMode
+    reasoning: str
+    subtasks: list[SubTask] = Field(default_factory=list)
+    context_file: Path | None = None
+    policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
+
+
+class CouncilSynthesis(BaseModel):
+    """Council modunda bağımsız sonuçların karşılaştırma ve sentezi."""
+
+    consensus: list[str] = Field(default_factory=list)
+    disagreements: list[str] = Field(default_factory=list)
+    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence_rationale: str = ""
+
+
+class ExecutionReport(BaseModel):
+    """Kullanıcıya sunulan veya kaydedilen tek nihai sonuç raporu."""
+
+    run_id: str = Field(default_factory=lambda: uuid4().hex)
+    task_prompt: str
+    mode: ExecutionMode
+    plan: TaskPlan
+    executions: list[ProviderExecution] = Field(default_factory=list)
+    final_summary: str
+    synthesis: CouncilSynthesis | None = None
+    next_step_recommendation: str | None = None
+    total_duration_ms: int = 0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class HistoryRecord(BaseModel):
+    """Geçmiş listesinde gösterilmek üzere SQLite'tan okunan hafif kayıt."""
+
+    run_id: str
+    created_at: str
+    mode: str
+    prompt_preview: str
+    providers_used: list[str] = Field(default_factory=list)
+    duration_ms: int
+    status: str

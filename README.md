@@ -141,9 +141,10 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] `voltran doctor`
 - [x] Ortak sağlayıcı adaptör arayüzü
 - [x] Codex, Claude ve Google Antigravity CLI adaptörleri
-- [ ] Router ve çalışma modları
-- [ ] Eleştiri/hakem akışı
-- [ ] Gizlilik politikaları ve maskeleme
+- [x] Router ve çalışma modları (`quick`, `expert`, `council`)
+- [x] Eleştiri ve hakem sentezi akışı
+- [x] Yerel SQLite çalışma geçmişi (`voltran history`)
+- [ ] Gizlilik politikaları ve gelişmiş veri maskeleme
 - [ ] Görev bazlı değerlendirme seti
 - [ ] Paketleme ve tek komutluk macOS kurulumu
 - [ ] İsteğe bağlı SwiftUI arayüz
@@ -159,4 +160,5 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 
 ## Durum
 
-Proje başlangıç aşamasındadır. Bir sonraki hedef, proje iskeletini oluşturmak ve `voltran doctor` komutunu çalışan ilk uçtan uca parça olarak geliştirmektir.
+Çekirdek orkestrasyon mekanizması (`quick`, `expert`, `council` modları, komutan, yönlendirici ve tek sonuç raporlama) tamamlanmıştır. `voltran run` ve `voltran history` komutları yerel olarak test edilebilir durumdadır.
+
