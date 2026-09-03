@@ -61,20 +61,23 @@ doğruluk gereken işler için.
 
 Metin ekibi görsel brifi hazırlar; uygun görsel sağlayıcısı üretim veya düzenleme yapar. Bu mod, ilgili sağlayıcının kullanılabilir görsel aracına göre etkinleşir.
 
-## İlk sürümün kapsamı (MVP)
+### İlk sürümün kapsamı (MVP)
 
 1. macOS Apple Silicon üzerinde çalışan `voltran` komutu.
 2. Resmî CLI adaptörleri:
    - Codex: `codex exec`
    - Claude Code: `claude -p`
-   - Google Antigravity CLI: `agy -p`
-3. Sağlayıcı erişilebilirlik ve oturum kontrolü.
-4. `quick`, `expert` ve `council` modları.
-5. Paralel alt görev çalıştırma, zaman aşımı ve hata izolasyonu.
-6. JSON tabanlı ortak görev/yanıt sözleşmesi.
-7. Yerel SQLite çalışma geçmişi ve denetim kaydı.
-8. Hassas veri uyarısı, sağlayıcı izin politikası ve isteğe bağlı maskeleme.
-9. Tek Markdown sonuç raporu.
+   - Google Antigravity CLI: `agy stream-json`
+3. Canlı çoklu ajan işbirliği motoru:
+   - `hcom` tabanlı PTY çalışma zamanı (`CollaborationRuntime`)
+   - Oturum gözetmeni ve uzlaşma denetimi (`CollaborationSupervisor`)
+4. Sağlayıcı erişilebilirlik ve oturum kontrolü (`voltran doctor`).
+5. `quick`, `expert` ve `council` modları.
+6. Paralel alt görev çalıştırma, zaman aşımı ve hata izolasyonu.
+7. JSON tabanlı ortak görev/yanıt sözleşmesi.
+8. Yerel SQLite çalışma geçmişi ve denetim kaydı.
+9. Hassas veri ve PII maskeleme katmanı (`sanitizer`).
+10. Tek Markdown sonuç raporu.
 
 MVP’de masaüstü arayüzü, bulut sunucusu, otomatik API harcaması ve sınırsız ajan sohbeti bulunmayacak.
 
@@ -92,6 +95,7 @@ MVP’de masaüstü arayüzü, bulut sunucusu, otomatik API harcaması ve sını
 ## Önerilen teknoloji yığını
 
 - Python 3.11+
+- `hcom` (MIT lisanslı hafif çoklu ajan haberleşme motoru)
 - `asyncio` ve güvenli alt süreç yönetimi
 - Typer tabanlı CLI
 - Pydantic tabanlı veri sözleşmeleri
@@ -104,12 +108,19 @@ Kesin paket sürümleri, ilk kurulum sırasında Mac’teki mevcut Python ve pak
 ## Kullanım ve Komutlar
 
 ### 🩺 Sistem Teşhisi (`voltran doctor`)
-Ortamı, gerekli araçları (`codex`, `claude`, `agy`) ve oturum durumunu hiçbir değişiklik yapmadan denetler:
+Ortamı, gerekli araçları (`codex`, `claude`, `agy`, `hcom`) ve oturum durumunu hiçbir değişiklik yapmadan denetler:
 ```bash
 uv run voltran doctor
 # Makinece okunabilir JSON çıktısı için:
 uv run voltran doctor --json
 ```
+
+> **Not:** `council` modunda canlı ajan işbirliği için `hcom` gereklidir:
+> ```bash
+> brew install aannoo/hcom/hcom
+> # veya uv ile:
+> uv tool install hcom
+> ```
 
 ### ⚡ Görev Yürütme (`voltran run`)
 Komutan görevi analiz ederek uygun çalışma modunu (`quick`, `expert`, `council`) ve modelleri otomatik seçer:
@@ -184,18 +195,19 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] Proje adı ve temel vizyon
 - [x] İlk gereksinimlerin tanımlanması
 - [x] Proje iskeleti ve test altyapısı
-- [x] `voltran doctor`
+- [x] `voltran doctor` (sistem, sağlayıcı ve `hcom` denetimi)
 - [x] Ortak sağlayıcı adaptör arayüzü
 - [x] Codex, Claude ve Google Antigravity CLI adaptörleri
 - [x] Router ve çalışma modları (`quick`, `expert`, `council`)
-- [x] Üç sağlayıcılı, ortak transkriptli konsey görüşmesi
+- [x] Canlı çoklu ajan işbirliği motoru (`CollaborationRuntime` + `Supervisor`)
 - [x] Yerel SQLite çalışma geçmişi (`voltran history`)
 - [x] Gizlilik koruması ve veri maskeleme (API key, token, PII)
 - [x] Hata ve zaman aşımı izolasyonu (`--timeout`, süreç iptali)
+- [ ] Kör hakemlik (Anonymized peer review — marka önyargısını önleme)
+- [ ] Dosya kilitleme ve sapma denetimi (File locking & drift detection)
 - [ ] Görev bazlı değerlendirme seti
 - [ ] Paketleme ve tek komutluk macOS kurulumu
-- [ ] İsteğe bağlı SwiftUI arayüz
-
+- [ ] İsteğe bağlı SwiftUI / TUI arayüz
 
 ## Resmî teknik dayanaklar
 
@@ -205,7 +217,9 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [Anthropic — Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference)
 - [Google — Antigravity CLI](https://antigravity.google/product/antigravity-cli)
 - [Google — Gemini CLI geçiş duyurusu](https://github.com/google-gemini/gemini-cli/discussions/28017)
+- [hcom — Agent-to-Agent IPC & Collaboration Runtime](https://github.com/aannoo/hcom)
 
 ## Durum
 
-Çekirdek orkestrasyon mekanizması (`quick`, `expert`, `council` modları, komutan, yönlendirici ve tek sonuç raporlama) tamamlanmıştır. `voltran run` ve `voltran history` komutları yerel olarak test edilebilir durumdadır.
+Çekirdek orkestrasyon ve canlı çoklu ajan işbirliği mekanizması (`quick`, `expert`, `council` modları, komutan, router, hcom çalışma motoru, gözetmen ve tek sonuç raporlama) tamamlanmıştır. `voltran run`, `voltran history` ve `voltran doctor` komutları yerel olarak test edilebilir durumdadır.
+
