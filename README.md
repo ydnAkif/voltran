@@ -153,6 +153,22 @@ voltran run -m council "Mimariyi karşılaştır"
 voltran history
 ```
 
+### 📊 Görev Bazlı Kıyaslama ve Değerlendirme (`voltran bench`)
+Standart senaryolar üzerinde modların ve modellerin süre, güven puanı ve uzlaşma başarısını ölçer:
+```bash
+# Hızlı simülasyon (kuru çalışma):
+uv run voltran bench --dry-run
+
+# JSON formatında ölçüm verisi:
+uv run voltran bench --dry-run --json
+```
+
+### 🍏 Tek Komutluk macOS Kurulumu
+Apple Silicon Mac'inize `uv`, `hcom` ve `voltran`'ı tek seferde kurmak için:
+```bash
+./scripts/install.sh
+```
+
 ### 📜 Çalışma Geçmişi (`voltran history`)
 Yerel SQLite veritabanındaki son çalışmaları listeler:
 ```bash
@@ -204,9 +220,10 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] Gizlilik koruması ve veri maskeleme (API key, token, PII)
 - [x] Kör hakemlik (Anonymized peer review — `--blind` ile marka önyargısını önleme)
 - [x] Dosya kilitleme ve sapma denetimi (`FileLockManager` ve `--write` ile çakışma önleme)
-- [ ] Görev bazlı değerlendirme seti
-- [ ] Paketleme ve tek komutluk macOS kurulumu
+- [x] Görev bazlı değerlendirme seti (`voltran bench`)
+- [x] Paketleme ve tek komutluk macOS kurulumu (`scripts/install.sh`)
 - [ ] İsteğe bağlı SwiftUI / TUI arayüz
+
 
 
 ## Resmî teknik dayanaklar

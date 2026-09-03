@@ -243,3 +243,68 @@ def history(
         )
 
     console.print(table)
+
+
+@app.command()
+def bench(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Modelleri gerçekte çağırmadan kıyaslama hattını simüle et.",
+        ),
+    ] = False,
+    timeout: Annotated[
+        float,
+        typer.Option(help="Her görev için saniye cinsinden zaman aşımı."),
+    ] = 60.0,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Çıktıyı JSON formatında üret."),
+    ] = False,
+) -> None:
+    """Standart değerlendirme setini çalıştır ve modların performansını kıyasla."""
+    import dataclasses
+
+    from voltran.eval import BenchmarkRunner
+    from voltran.models import ExecutionStatus
+
+    runner = BenchmarkRunner()
+    results = asyncio.run(runner.run_all(dry_run=dry_run, timeout=timeout))
+
+    if json_output:
+        typer.echo(
+            json.dumps(
+                [dataclasses.asdict(r) for r in results],
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            )
+        )
+        return
+
+    table = Table(title="VOLTRAN Görev Bazlı Kıyaslama Raporu", show_lines=True)
+    table.add_column("Görev ID", no_wrap=True)
+    table.add_column("Başlık")
+    table.add_column("Kategori")
+    table.add_column("Mod")
+    table.add_column("Durum", no_wrap=True)
+    table.add_column("Süre (ms)", justify="right")
+    table.add_column("Güven", justify="right")
+    table.add_column("Uzlaşma")
+
+    for res in results:
+        status_color = "green" if res.status == ExecutionStatus.SUCCESS else "red"
+        consensus_text = "[green]Var[/green]" if res.consensus_reached else "[dim]Tek/Yok[/dim]"
+        table.add_row(
+            res.task_id,
+            res.title,
+            res.category,
+            res.mode.value.upper(),
+            f"[{status_color}]{res.status.value}[/{status_color}]",
+            str(res.duration_ms),
+            f"%{round(res.confidence_score * 100)}",
+            consensus_text,
+        )
+
+    console.print(table)
