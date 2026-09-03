@@ -30,7 +30,6 @@ class AntigravityAdapter(CliProviderAdapter):
         mode = "accept-edits" if policy.allow_writes else "plan"
         command = [
             executable,
-            "--print",
             "--output-format",
             "text",
             "--mode",
@@ -42,4 +41,5 @@ class AntigravityAdapter(CliProviderAdapter):
         ]
         if task.model:
             command.extend(("--model", task.model))
+        command.extend(("--print", "-"))
         return command
