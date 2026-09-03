@@ -144,7 +144,7 @@ def run(
 
     router = Router()
     try:
-        router.assign_providers(plan)
+        router.assign_providers(plan, dry_run=dry_run)
     except RuntimeError as exc:
         console.print(f"[red]Yönlendirme hatası:[/red] {exc}")
         raise typer.Exit(code=1) from exc

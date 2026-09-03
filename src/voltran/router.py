@@ -87,6 +87,7 @@ class Router:
         plan: TaskPlan,
         *,
         allowed_providers: Sequence[str] | None = None,
+        dry_run: bool = False,
     ) -> TaskPlan:
         """Plandaki her alt göreve en uygun sağlayıcıyı puanlayarak atar."""
 
@@ -103,11 +104,15 @@ class Router:
             available = self.available_adapters(allowed_keys=allowed_providers)
 
         if not available:
-            raise RuntimeError(
-                "Kullanılabilir veya erişilebilir hiçbir sağlayıcı CLI bulunamadı. "
-                "Lütfen 'voltran doctor' komutunu çalıştırarak araçların kurulu ve "
-                "PATH üzerinde olduğunu doğrulayın."
-            )
+            if dry_run:
+                # Kuru çalışmada araçlar henüz kurulu olmasa bile plan simülasyonu gösterilebilir
+                available = list(self.registry.values())
+            else:
+                raise RuntimeError(
+                    "Kullanılabilir veya erişilebilir hiçbir sağlayıcı CLI bulunamadı. "
+                    "Lütfen 'voltran doctor' komutunu çalıştırarak araçların kurulu ve "
+                    "PATH üzerinde olduğunu doğrulayın."
+                )
 
         # Sağlayıcıları göreve ve moda göre puanla ve sırala
         ranked = sorted(
