@@ -1,4 +1,4 @@
-"""VOLTRAN Yönlendirici (Router) bileşeni — Sağlayıcı ve yetenek eşleştirme."""
+"""VOLTRAN Yönlendirici (Router) bileşeni — Akıllı yetenek ve sağlayıcı eşleştirme."""
 
 from __future__ import annotations
 
@@ -6,6 +6,49 @@ from collections.abc import Sequence
 
 from voltran.models import ExecutionMode, ProviderCapabilities, TaskPlan
 from voltran.providers import ProviderAdapter, default_registry
+
+
+def score_adapter(
+    adapter: ProviderAdapter,
+    mode: ExecutionMode,
+    *,
+    has_file: bool = False,
+) -> float:
+    """Sağlayıcının göreve, yeteneğe ve moda uygunluk puanını (0.0 - 1.0) hesaplar."""
+
+    if not adapter.availability():
+        return 0.0
+
+    caps = adapter.capabilities()
+    base_score = 0.5
+
+    # Dosya erişim yeteneği gerekiyorsa
+    if has_file:
+        if caps.file_access:
+            base_score += 0.2
+        else:
+            base_score -= 0.3
+
+    match mode:
+        case ExecutionMode.QUICK:
+            # Hızlı mod için hafif ve doğrudan CLI yanıtı veren modeller öncelikli
+            weights = {"google": 0.3, "claude": 0.25, "codex": 0.2}
+            base_score += weights.get(adapter.key, 0.1)
+        case ExecutionMode.EXPERT:
+            # Uzman modu için derin mantık ve kodlama gücü öncelikli
+            weights = {"claude": 0.3, "codex": 0.28, "google": 0.2}
+            base_score += weights.get(adapter.key, 0.1)
+        case ExecutionMode.COUNCIL:
+            # Konsey için güçlü modeller dengeli puanlanır
+            weights = {"claude": 0.3, "codex": 0.29, "google": 0.25}
+            base_score += weights.get(adapter.key, 0.1)
+        case ExecutionMode.VISUAL:
+            if caps.images:
+                base_score += 0.4
+            else:
+                base_score -= 0.2
+
+    return max(0.0, min(1.0, base_score))
 
 
 class Router:
@@ -45,11 +88,10 @@ class Router:
         *,
         allowed_providers: Sequence[str] | None = None,
     ) -> TaskPlan:
-        """Plandaki her alt göreve en uygun sağlayıcıyı atar."""
+        """Plandaki her alt göreve en uygun sağlayıcıyı puanlayarak atar."""
 
-        req_caps = None
-        if plan.context_file is not None:
-            req_caps = ProviderCapabilities(file_access=True)
+        has_file = plan.context_file is not None
+        req_caps = ProviderCapabilities(file_access=True) if has_file else None
 
         available = self.available_adapters(
             allowed_keys=allowed_providers,
@@ -57,35 +99,36 @@ class Router:
         )
 
         if not available:
-            # Fallback: yetenek filtresi olmadan sadece erişilebilir olanları dene
+            # Yetenek filtresi olmadan sadece erişilebilir olanları dene
             available = self.available_adapters(allowed_keys=allowed_providers)
 
         if not available:
-            # Hiç sağlayıcı yoksa veya mocklanmadıysa kayıtlı olanları sırayla ata
-            available = list(self.registry.values())
+            raise RuntimeError(
+                "Kullanılabilir veya erişilebilir hiçbir sağlayıcı CLI bulunamadı. "
+                "Lütfen 'voltran doctor' komutunu çalıştırarak araçların kurulu ve "
+                "PATH üzerinde olduğunu doğrulayın."
+            )
 
-        if not available:
-            raise RuntimeError("Kayıtlı hiçbir model sağlayıcısı bulunamadı.")
+        # Sağlayıcıları göreve ve moda göre puanla ve sırala
+        ranked = sorted(
+            available,
+            key=lambda a: score_adapter(a, plan.mode, has_file=has_file),
+            reverse=True,
+        )
 
         if plan.mode == ExecutionMode.COUNCIL:
-            # Council için farklı sağlayıcıları eşleştirmeye çalış
+            # Council için en yüksek puanlı iki farklı sağlayıcıyı eşleştir
             assigned_keys: set[str] = set()
             for idx, subtask in enumerate(plan.subtasks):
-                # Henüz seçilmemiş bir sağlayıcı bul
                 candidate = next(
-                    (a for a in available if a.key not in assigned_keys),
-                    available[idx % len(available)],
+                    (a for a in ranked if a.key not in assigned_keys),
+                    ranked[idx % len(ranked)],
                 )
                 subtask.assigned_provider = candidate.key
                 assigned_keys.add(candidate.key)
         else:
-            # Quick ve Expert modları
-            preferred_order = ["claude", "codex", "google"]
-            candidate = next(
-                (a for key in preferred_order for a in available if a.key == key),
-                available[0],
-            )
+            best_adapter = ranked[0]
             for subtask in plan.subtasks:
-                subtask.assigned_provider = candidate.key
+                subtask.assigned_provider = best_adapter.key
 
         return plan

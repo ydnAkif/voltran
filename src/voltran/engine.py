@@ -13,6 +13,7 @@ from voltran.models import (
     ExecutionStatus,
     ProviderExecution,
     ProviderTask,
+    SubTask,
     TaskPlan,
     TaskResult,
 )
@@ -118,9 +119,14 @@ class ExecutionEngine:
             task = ProviderTask(
                 task_id=st.subtask_id,
                 prompt=prompt,
+                role=st.role,
+                purpose=st.purpose,
                 model=st.model,
             )
             execution = await adapter.execute(task, context, plan.policy)
+            if execution.result:
+                execution.result.metadata["role"] = st.role
+                execution.result.metadata["purpose"] = st.purpose
             executions.append(execution)
 
             if execution.status == ExecutionStatus.SUCCESS and execution.result:
@@ -150,9 +156,9 @@ class ExecutionEngine:
         context: str | None,
         started: float,
     ) -> ExecutionReport:
-        """Council modunda bağımsız uzmanları paralel çalıştırıp sentezler."""
+        """Council modunda bağımsız uzmanları paralel çalıştırıp hakem turuyla sentezler."""
 
-        async def _run_subtask(subtask) -> ProviderExecution:
+        async def _run_subtask(subtask: SubTask) -> ProviderExecution:
             provider_key = subtask.assigned_provider or "codex"
             adapter = self.registry.get(provider_key)
             if adapter is None:
@@ -166,42 +172,126 @@ class ExecutionEngine:
             task = ProviderTask(
                 task_id=subtask.subtask_id,
                 prompt=prompt,
+                role=subtask.role,
+                purpose=subtask.purpose,
                 model=subtask.model,
             )
-            return await adapter.execute(task, context, plan.policy)
+            res = await adapter.execute(task, context, plan.policy)
+            if res.result:
+                res.result.metadata["role"] = subtask.role
+                res.result.metadata["purpose"] = subtask.purpose
+            return res
 
         tasks = [_run_subtask(st) for st in plan.subtasks]
-        executions = await asyncio.gather(*tasks)
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        executions: list[ProviderExecution] = []
+        for idx, res in enumerate(raw_results):
+            if isinstance(res, BaseException):
+                st = plan.subtasks[idx]
+                executions.append(
+                    ProviderExecution(
+                        run_id=st.subtask_id,
+                        provider=st.assigned_provider or "unknown",
+                        status=ExecutionStatus.FAILED,
+                        duration_ms=0,
+                        error=f"Beklenmeyen adaptör hatası: {type(res).__name__}: {res}",
+                    )
+                )
+            else:
+                executions.append(res)
 
         successful = [e for e in executions if e.status == ExecutionStatus.SUCCESS and e.result]
         synthesis: CouncilSynthesis
 
         if len(successful) >= 2:
-            summaries = [
-                f"**{e.provider.upper()}:**\n{e.result.summary}" for e in successful if e.result
-            ]
-            final_summary = "\n\n---\n\n".join(summaries)
-            synthesis = CouncilSynthesis(
-                consensus=[
-                    "Her iki uzman da görevi bağımsız analiz ederek çözümler sundu.",
-                    "Temel prensipler ve ortak teknik hedefler uyumlu.",
-                ],
-                disagreements=[
-                    (
-                        "Modeller farklı uygulama detayları veya öncelikler önermiş "
-                        "olabilir. Ayrıntılar yukarıdaki özetlerde verilmiştir."
-                    ),
-                ],
-                confidence_score=0.92,
-                confidence_rationale="İki bağımsız model tarafından doğrulandı.",
+            # 2. Tur: Hakem (Judge) çağrısı ile gerçek eleştiri ve sentez
+            judge_key = next(
+                (k for k in ("claude", "codex", "google") if k in self.registry),
+                successful[0].provider,
             )
+            judge_adapter = self.registry.get(judge_key)
+
+            candidate_sections: list[str] = []
+            for i, e in enumerate(successful, 1):
+                role_name = (
+                    e.result.metadata.get("role", f"Uzman {i}") if e.result else f"Uzman {i}"
+                )
+                sol = e.result.summary if e.result else ""
+                candidate_sections.append(f"### {role_name} ({e.provider.upper()}) ÇÖZÜMÜ:\n{sol}")
+
+            judge_input = (
+                f"GÖREV:\n{prompt}\n\n"
+                "Aşağıda bağımsız uzmanların bu göreve sundukları aday çözümler yer almaktadır:\n\n"
+                + "\n\n---\n\n".join(candidate_sections)
+                + "\n\n"
+                "Lütfen konsey hakemi olarak bu çözümleri tarafsızca değerlendir:\n"
+                "1. Uzmanların ortak uzlaştığı noktaları belirt.\n"
+                "2. Çelişen veya farklılaşan önerileri ve riskleri tespit et.\n"
+                "3. İki çözümün güçlü yönlerini birleştirerek tek, "
+                "eksiksiz bir sentez nihai sonuç oluştur."
+            )
+
+            judge_task = ProviderTask(
+                prompt=judge_input,
+                role="Konsey Hakemi ve Sentezci",
+                purpose=(
+                    "Bağımsız uzman çözümlerini eleştirerek ortak konsensüs ve "
+                    "nihai sentezi oluştur."
+                ),
+            )
+
+            judge_execution: ProviderExecution | None = None
+            if judge_adapter is not None:
+                try:
+                    judge_execution = await judge_adapter.execute(judge_task, context, plan.policy)
+                except Exception:
+                    judge_execution = None
+
+            if (
+                judge_execution is not None
+                and judge_execution.status == ExecutionStatus.SUCCESS
+                and judge_execution.result
+            ):
+                executions.append(judge_execution)
+                final_summary = judge_execution.result.summary
+                synthesis = CouncilSynthesis(
+                    consensus=[
+                        "Bağımsız uzman çözümleri incelendi ve ortak doğrular sentezlendi.",
+                        f"Hakem incelemesi: {judge_key.capitalize()}",
+                    ],
+                    disagreements=[
+                        (
+                            "Uzmanlar arasındaki alternatif yaklaşım ve yöntem "
+                            "farkları hakem tarafından çözümlendi."
+                        ),
+                    ],
+                    confidence_score=0.90,
+                    confidence_rationale=(
+                        f"Çözümler {len(successful)} bağımsız model tarafından üretildi ve "
+                        f"{judge_key.capitalize()} hakemi tarafından sentezlendi."
+                    ),
+                )
+            else:
+                # Hakem modeli yoksa şeffaf karşılaştırma ve dürüst güven skoru
+                final_summary = "\n\n---\n\n".join(candidate_sections)
+                synthesis = CouncilSynthesis(
+                    consensus=["İki bağımsız uzman aday çözümü başarıyla toplandı."],
+                    disagreements=[
+                        "Uzman aday çözümleri doğrudan karşılaştırmanız için yukarıda sunulmuştur.",
+                    ],
+                    confidence_score=0.75,
+                    confidence_rationale=(
+                        "İki bağımsız çözüm üretildi, ek hakem turu çalıştırılmadan ham sunuldu."
+                    ),
+                )
         elif len(successful) == 1:
             res = successful[0].result
             final_summary = res.summary if res else ""
             synthesis = CouncilSynthesis(
                 consensus=["Tek bir model başarıyla sonuç üretebildi."],
                 disagreements=["Diğer model çağrısı başarısız oldu veya zaman aşımına uğradı."],
-                confidence_score=0.70,
+                confidence_score=0.60,
                 confidence_rationale="Yalnızca tek model çıktısı mevcut (kısmi başarı).",
             )
         else:

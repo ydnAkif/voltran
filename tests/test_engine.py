@@ -19,10 +19,18 @@ from voltran.providers import ProviderAdapter
 
 
 class _DummyAdapter:
-    def __init__(self, key: str, output: str, fail: bool = False) -> None:
+    def __init__(
+        self,
+        key: str,
+        output: str,
+        fail: bool = False,
+        raise_exc: bool = False,
+    ) -> None:
         self.key = key
         self.output = output
         self.fail = fail
+        self.raise_exc = raise_exc
+        self.received_tasks: list[ProviderTask] = []
 
     def availability(self) -> bool:
         return True
@@ -34,8 +42,14 @@ class _DummyAdapter:
         return ProviderHealth(provider=self.key, available=True, message="ok")
 
     async def execute(
-        self, task: ProviderTask, context: str | None, policy: ExecutionPolicy
+        self,
+        task: ProviderTask,
+        context: str | None,
+        policy: ExecutionPolicy,
     ) -> ProviderExecution:
+        self.received_tasks.append(task)
+        if self.raise_exc:
+            raise RuntimeError("Beklenmeyen adaptör çökmesi")
         if self.fail:
             return ProviderExecution(
                 run_id=task.task_id,
@@ -59,52 +73,65 @@ class _DummyAdapter:
         return TaskResult(summary=raw_output, status="success")
 
 
-def test_engine_executes_single_mode() -> None:
+def test_engine_executes_single_mode_forwarding_subtask_role() -> None:
     async def scenario() -> None:
-        registry: dict[str, ProviderAdapter] = {
-            "claude": _DummyAdapter("claude", "Claude cevabı"),
-        }
+        claude = _DummyAdapter("claude", "Claude uzman cevabı")
+        registry: dict[str, ProviderAdapter] = {"claude": claude}
         engine = ExecutionEngine(registry)
         plan = TaskPlan(
-            mode=ExecutionMode.QUICK,
-            reasoning="hızlı test",
-            subtasks=[SubTask(role="hızlı", purpose="p", assigned_provider="claude")],
+            mode=ExecutionMode.EXPERT,
+            reasoning="uzman testi",
+            subtasks=[
+                SubTask(
+                    role="Güvenlik Denetçisi",
+                    purpose="Kod açıklarını tara",
+                    assigned_provider="claude",
+                )
+            ],
         )
 
-        report = await engine.execute_plan("Özetle", plan)
+        report = await engine.execute_plan("Güvenlik incelemesi yap", plan)
 
-        assert report.mode == ExecutionMode.QUICK
-        assert "Claude cevabı" in report.final_summary
-        assert len(report.executions) == 1
-        assert report.executions[0].status == ExecutionStatus.SUCCESS
+        assert report.mode == ExecutionMode.EXPERT
+        assert "Claude uzman cevabı" in report.final_summary
+        assert len(claude.received_tasks) == 1
+        assert claude.received_tasks[0].role == "Güvenlik Denetçisi"
+        assert claude.received_tasks[0].purpose == "Kod açıklarını tara"
 
     asyncio.run(scenario())
 
 
-def test_engine_executes_council_with_synthesis() -> None:
+def test_engine_executes_council_with_judge_synthesis() -> None:
     async def scenario() -> None:
-        registry: dict[str, ProviderAdapter] = {
-            "claude": _DummyAdapter("claude", "Claude mimari analizi"),
-            "codex": _DummyAdapter("codex", "Codex mimari analizi"),
-        }
+        claude = _DummyAdapter("claude", "Ortak Hakem Sentezi")
+        codex = _DummyAdapter("codex", "Codex mimari analizi")
+        registry: dict[str, ProviderAdapter] = {"claude": claude, "codex": codex}
         engine = ExecutionEngine(registry)
         plan = TaskPlan(
             mode=ExecutionMode.COUNCIL,
             reasoning="konsey testi",
             subtasks=[
-                SubTask(role="uzman_1", purpose="p1", assigned_provider="claude"),
-                SubTask(role="uzman_2", purpose="p2", assigned_provider="codex"),
+                SubTask(
+                    role="Mimar A",
+                    purpose="Mikroservis odaklı plan",
+                    assigned_provider="claude",
+                ),
+                SubTask(
+                    role="Mimar B",
+                    purpose="Monolit odaklı plan",
+                    assigned_provider="codex",
+                ),
             ],
         )
 
         report = await engine.execute_plan("Mimariyi karşılaştır", plan)
 
         assert report.mode == ExecutionMode.COUNCIL
-        assert "Claude mimari analizi" in report.final_summary
-        assert "Codex mimari analizi" in report.final_summary
         assert report.synthesis is not None
-        assert report.synthesis.confidence_score > 0.8
-        assert len(report.executions) == 2
+        assert report.synthesis.confidence_score >= 0.8
+        # Claude hem uzman hem hakem olarak çalıştırıldı
+        assert len(report.executions) == 3
+        assert "Ortak Hakem Sentezi" in report.final_summary
 
     asyncio.run(scenario())
 
@@ -130,15 +157,41 @@ def test_engine_handles_partial_failure_in_council() -> None:
         # Sistem çökmemeli, kısmi başarıyı raporlamalı
         assert "Başarılı Claude çıktısı" in report.final_summary
         assert report.synthesis is not None
-        assert report.synthesis.confidence_score < 0.8
+        assert report.synthesis.confidence_score <= 0.75
         assert any(e.status == ExecutionStatus.FAILED for e in report.executions)
+
+    asyncio.run(scenario())
+
+
+def test_engine_handles_unexpected_exception_in_gather() -> None:
+    async def scenario() -> None:
+        registry: dict[str, ProviderAdapter] = {
+            "claude": _DummyAdapter("claude", "Claude sağlam"),
+            "codex": _DummyAdapter("codex", "", raise_exc=True),
+        }
+        engine = ExecutionEngine(registry)
+        plan = TaskPlan(
+            mode=ExecutionMode.COUNCIL,
+            reasoning="çökme izolasyonu",
+            subtasks=[
+                SubTask(role="uzman_1", purpose="p1", assigned_provider="claude"),
+                SubTask(role="uzman_2", purpose="p2", assigned_provider="codex"),
+            ],
+        )
+
+        # Beklenmeyen Exception fırlatan adaptör tüm council'ı düşürmemeli
+        report = await engine.execute_plan("Test", plan)
+
+        assert report.mode == ExecutionMode.COUNCIL
+        assert "Claude sağlam" in report.final_summary
+        failed_exec = next(e for e in report.executions if e.status == ExecutionStatus.FAILED)
+        assert "Beklenmeyen adaptör hatası" in str(failed_exec.error)
 
     asyncio.run(scenario())
 
 
 def test_engine_dry_run_does_not_execute_providers() -> None:
     async def scenario() -> None:
-        # Boş registry ile bile dry run çalışabilmeli
         engine = ExecutionEngine({})
         plan = TaskPlan(
             mode=ExecutionMode.EXPERT,

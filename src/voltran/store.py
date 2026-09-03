@@ -7,8 +7,10 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
+from typing import cast
 
 from voltran.models import ExecutionReport, HistoryRecord
+from voltran.sanitizer import sanitize_text
 
 
 def get_default_db_path() -> Path:
@@ -75,6 +77,9 @@ class RunStore:
             "success" if any(e.status == "success" for e in report.executions) else "failed"
         )
 
+        clean_prompt = sanitize_text(report.task_prompt[:300])
+        clean_summary = sanitize_text(report.final_summary[:500])
+
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
@@ -87,11 +92,11 @@ class RunStore:
                         report.run_id,
                         report.created_at.isoformat(),
                         report.mode.value,
-                        report.task_prompt[:300],
+                        clean_prompt,
                         json.dumps(providers),
                         report.total_duration_ms,
                         overall_status,
-                        report.final_summary[:500],
+                        clean_summary,
                     ),
                 )
                 conn.commit()
@@ -118,21 +123,28 @@ class RunStore:
                 records: list[HistoryRecord] = []
                 for row in rows:
                     run_id, created_at, mode, prompt, providers_json, duration_ms, status = row
+                    providers: list[str] = []
                     try:
-                        providers = json.loads(providers_json)
-                    except json.JSONDecodeError:
-                        providers = []
+                        raw_providers: object = json.loads(str(providers_json))
+                        if isinstance(raw_providers, list):
+                            obj_list = cast(list[object], raw_providers)
+                            for item in obj_list:
+                                providers.append(str(item))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
                     records.append(
                         HistoryRecord(
-                            run_id=run_id,
-                            created_at=created_at,
-                            mode=mode,
-                            prompt_preview=prompt,
+                            run_id=str(run_id),
+                            created_at=str(created_at),
+                            mode=str(mode),
+                            prompt_preview=str(prompt),
                             providers_used=providers,
-                            duration_ms=duration_ms,
-                            status=status,
+                            duration_ms=int(duration_ms),
+                            status=str(status),
                         )
                     )
                 return records
+
         except sqlite3.Error:
             return []

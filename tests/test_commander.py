@@ -21,7 +21,7 @@ def test_detect_mode_identifies_quick_for_simple_tasks() -> None:
 
 
 def test_detect_mode_identifies_visual_for_diagrams() -> None:
-    mode, reasoning = detect_mode("Bu akış için bir mimari diyagram çiz")
+    mode, _ = detect_mode("Bu akış için bir mimari diyagram çiz")
     assert mode == ExecutionMode.VISUAL
 
 

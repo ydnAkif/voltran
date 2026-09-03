@@ -38,5 +38,9 @@ jobs:
       - name: Run Ruff Formatter check
         run: uv run ruff format --check .
 
+      - name: Run Pyright Type Checker
+        run: uv run pyright
+
       - name: Run Pytest
         run: uv run pytest -v
+

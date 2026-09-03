@@ -43,3 +43,27 @@ def test_store_saves_and_lists_reports(tmp_path: Path) -> None:
     assert history[0].status == "success"
     assert "Kısa test görevi" in history[0].prompt_preview
     assert history[0].providers_used == ["claude"]
+
+
+def test_store_redacts_secrets_and_pii_in_sqlite(tmp_path: Path) -> None:
+    db_path = tmp_path / "test_privacy_voltran.db"
+    store = RunStore(db_path)
+
+    plan = TaskPlan(mode=ExecutionMode.QUICK, reasoning="test")
+    report = ExecutionReport(
+        task_prompt="API çağrısı: sk-1234567890abcdef1234567890 ve user@example.com",
+        mode=ExecutionMode.QUICK,
+        plan=plan,
+        executions=[],
+        final_summary="Gizli çıktı: password=supersecret1234567890",
+        total_duration_ms=50,
+    )
+
+    store.save_report(report)
+    history = store.list_recent()
+
+    assert len(history) == 1
+    assert "sk-1234567890" not in history[0].prompt_preview
+    assert "user@example.com" not in history[0].prompt_preview
+    assert "[REDACTED_API_KEY]" in history[0].prompt_preview
+    assert "[REDACTED_EMAIL]" in history[0].prompt_preview

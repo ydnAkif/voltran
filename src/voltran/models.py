@@ -87,6 +87,9 @@ class ProviderTask(BaseModel):
 
     task_id: str = Field(default_factory=lambda: uuid4().hex)
     prompt: str = Field(min_length=1)
+    role: str = ""
+    purpose: str = ""
+    instructions: str = ""
     working_directory: Path = Field(default_factory=Path.cwd)
     model: str | None = None
 
@@ -136,7 +139,7 @@ class TaskPlan(BaseModel):
 
     mode: ExecutionMode
     reasoning: str
-    subtasks: list[SubTask] = Field(default_factory=list)
+    subtasks: list[SubTask] = Field(default_factory=lambda: list[SubTask]())
     context_file: Path | None = None
     policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
 
@@ -144,8 +147,8 @@ class TaskPlan(BaseModel):
 class CouncilSynthesis(BaseModel):
     """Council modunda bağımsız sonuçların karşılaştırma ve sentezi."""
 
-    consensus: list[str] = Field(default_factory=list)
-    disagreements: list[str] = Field(default_factory=list)
+    consensus: list[str] = Field(default_factory=lambda: list[str]())
+    disagreements: list[str] = Field(default_factory=lambda: list[str]())
     confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
     confidence_rationale: str = ""
 
@@ -157,7 +160,7 @@ class ExecutionReport(BaseModel):
     task_prompt: str
     mode: ExecutionMode
     plan: TaskPlan
-    executions: list[ProviderExecution] = Field(default_factory=list)
+    executions: list[ProviderExecution] = Field(default_factory=lambda: list[ProviderExecution]())
     final_summary: str
     synthesis: CouncilSynthesis | None = None
     next_step_recommendation: str | None = None
@@ -172,6 +175,6 @@ class HistoryRecord(BaseModel):
     created_at: str
     mode: str
     prompt_preview: str
-    providers_used: list[str] = Field(default_factory=list)
+    providers_used: list[str] = Field(default_factory=lambda: list[str]())
     duration_ms: int
     status: str
