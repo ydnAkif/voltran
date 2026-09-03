@@ -34,7 +34,24 @@ def test_provider_commands_keep_prompt_out_of_process_arguments(tmp_path: Path) 
     assert "plan" in commands[2]
     assert "--safe-mode" in commands[1]
     assert "--new-project" in commands[2]
+    assert "stream-json" in commands[2]
+    assert "--print" not in commands[2]
     assert all("dangerously" not in " ".join(command) for command in commands)
+
+
+def test_antigravity_normalizes_stream_json_result() -> None:
+    adapter = AntigravityAdapter(finder=_finder)
+    raw = "\n".join(
+        [
+            '{"event":"init","conversation_id":"test"}',
+            '{"event":"result","result":{"status":"SUCCESS","response":"Ortak cevap"}}',
+        ]
+    )
+
+    result = adapter.normalize_result(raw)
+
+    assert result.status == "success"
+    assert result.summary == "Ortak cevap"
 
 
 class _PythonAdapter(CliProviderAdapter):

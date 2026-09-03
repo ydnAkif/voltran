@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from uuid import uuid4
 
+from voltran.collaboration import AgentRole, CollaborationRuntime
+from voltran.hcom_client import HcomClientError
 from voltran.models import (
     CouncilSynthesis,
     ExecutionMode,
@@ -12,18 +15,29 @@ from voltran.models import (
     ExecutionStatus,
     ProviderExecution,
     ProviderTask,
-    SubTask,
     TaskPlan,
     TaskResult,
 )
 from voltran.providers import ProviderAdapter, default_registry
+from voltran.supervisor import (
+    CollaborationSupervisor,
+    SupervisionStatus,
+    SupervisorPolicy,
+)
 
 
 class ExecutionEngine:
     """Alt görevleri planlanan modlara göre koordine eder ve yürütür."""
 
-    def __init__(self, registry: dict[str, ProviderAdapter] | None = None) -> None:
+    def __init__(
+        self,
+        registry: dict[str, ProviderAdapter] | None = None,
+        collaboration_runtime: CollaborationRuntime | None = None,
+        supervisor: CollaborationSupervisor | None = None,
+    ) -> None:
         self.registry = registry if registry is not None else default_registry()
+        self.collaboration_runtime = collaboration_runtime or CollaborationRuntime()
+        self.supervisor = supervisor
 
     async def execute_plan(
         self,
@@ -155,163 +169,195 @@ class ExecutionEngine:
         context: str | None,
         started: float,
     ) -> ExecutionReport:
-        """Sağlayıcıları ortak transkript üzerinden, tur bazlı olarak birlikte çalıştırır."""
+        """Sağlayıcıları kalıcı hcom oturumlarında canlı olarak birlikte çalıştırır."""
 
-        async def _run_subtask(
-            subtask: SubTask,
-            *,
-            round_number: int,
-            transcript: str,
-        ) -> ProviderExecution:
-            provider_key = subtask.assigned_provider or "codex"
-            adapter = self.registry.get(provider_key)
-            if adapter is None:
-                return ProviderExecution(
-                    run_id=subtask.subtask_id,
-                    provider=provider_key,
-                    status=ExecutionStatus.FAILED,
-                    duration_ms=0,
-                    error=f"Sağlayıcı adaptörü '{provider_key}' bulunamadı.",
-                )
-            task = ProviderTask(
-                task_id=subtask.subtask_id,
+        if not self.collaboration_runtime.is_available():
+            return self._council_failure_report(
+                run_id=run_id,
                 prompt=prompt,
+                plan=plan,
+                started=started,
+                error=(
+                    "hcom işbirliği motoru bulunamadı. Council modu için kurun: "
+                    "brew install aannoo/hcom/hcom"
+                ),
+            )
+
+        roles = [
+            AgentRole(
+                name=f"vt-{run_id[:6]}-{index}",
+                provider=subtask.assigned_provider or "codex",
                 role=subtask.role,
                 purpose=subtask.purpose,
                 model=subtask.model,
-                instructions=(
-                    "ORTAK ÇALIŞMA PROTOKOLÜ:\n"
-                    f"Bu, konsey görüşmesinin {round_number}. turudur. "
-                    "Aşağıdaki ortak konuşmayı dikkatle oku; diğer çalışma ortaklarının "
-                    "fikirlerine doğrudan yanıt ver, katıldığın ve itiraz ettiğin noktaları "
-                    "belirt, eksikleri tamamla ve ekibi uygulanabilir tek bir sonuca yaklaştır. "
-                    "Önceki cevapları yalnızca tekrar etme.\n\n"
-                    f"ORTAK KONUŞMA:\n{transcript or '[Henüz mesaj yok]'}"
-                ),
             )
-            res = await adapter.execute(task, context, plan.policy)
-            if res.result:
-                res.result.metadata["role"] = subtask.role
-                res.result.metadata["purpose"] = subtask.purpose
-                res.result.metadata["round"] = round_number
-            return res
+            for index, subtask in enumerate(plan.subtasks, start=1)
+        ]
+        working_dir = plan.context_file.parent if plan.context_file else Path.cwd()
+        permission_note = (
+            "Dosyalarda değişiklik yapma; yalnızca analiz et."
+            if not plan.policy.allow_writes
+            else "Yalnızca verilen görev kapsamındaki dosyalarda değişiklik yap."
+        )
+        session_prompt = prompt
+        if context:
+            session_prompt += f"\n\nBAĞLAM:\n{context[: plan.policy.max_output_chars]}"
 
-        # İki tur kullanılır: ilk turda görüşler oluşur; ikinci turda her sağlayıcı,
-        # diğerlerinin mesajlarını da görerek ortak çözümü geliştirir.
-        executions: list[ProviderExecution] = []
-        transcript_parts: list[str] = []
-        for round_number in (1, 2):
-            for st in plan.subtasks:
-                try:
-                    execution = await _run_subtask(
-                        st,
-                        round_number=round_number,
-                        transcript="\n\n".join(transcript_parts),
-                    )
-                except Exception as exc:
-                    execution = ProviderExecution(
-                        run_id=st.subtask_id,
-                        provider=st.assigned_provider or "unknown",
-                        status=ExecutionStatus.FAILED,
-                        duration_ms=0,
-                        error=f"Beklenmeyen adaptör hatası: {type(exc).__name__}: {exc}",
-                    )
-                executions.append(execution)
-                if execution.status == ExecutionStatus.SUCCESS and execution.result:
-                    # Ortak bağlamın kontrolsüz büyümesini engelle; tam çıktı raporda kalır.
-                    excerpt = execution.result.summary[:20_000]
-                    transcript_parts.append(
-                        f"### Tur {round_number} — {st.role} "
-                        f"({execution.provider.upper()})\n{excerpt}"
-                    )
+        session = None
+        try:
+            session = await self.collaboration_runtime.start_session(
+                session_prompt,
+                roles,
+                working_dir=working_dir,
+                headless=True,
+                allow_writes=plan.policy.allow_writes,
+            )
+            if len(session.event_names) != len(roles):
+                raise HcomClientError("Başlatılan hcom ajan kimlikleri doğrulanamadı.")
 
-        successful = [e for e in executions if e.status == ExecutionStatus.SUCCESS and e.result]
-        successful_providers = {e.provider for e in successful}
-        synthesis: CouncilSynthesis
+            addresses = ", ".join(f"@{role.name}-" for role in roles)
+            mission = (
+                f"VOLTRAN ortak görevi başladı. Ekip: {addresses}. {permission_note} "
+                "Birbirinizin görüşünü isteyin, itirazları doğrudan tartışın ve görev "
+                "devredin. Kendi katkınız bittiğinde VOLTRAN_DONE yazın. En az iki ajan "
+                "ortak karara vardığında nihai mesajda VOLTRAN_CONSENSUS kullanın."
+            )
+            # Global broadcast kullanma: aynı makinedeki başka hcom oturumlarını uyandırabilir.
+            for role in roles:
+                await self.collaboration_runtime.send_to_role(session, role.name, mission)
 
-        if len(successful_providers) >= 2:
-            # Son konuşmacı, tüm ortak transkripti görmüş durumdadır ve ekip adına
-            # karar kaydı üretir. Bu bir bağımsız hakem değil, ortak çalışmanın son adımıdır.
-            finalizer_execution: ProviderExecution | None = None
-            finalizer_key = successful[-1].provider
-            finalizer = self.registry.get(finalizer_key)
-            if finalizer is not None:
-                finalizer_task = ProviderTask(
-                    prompt=prompt,
-                    role="Konsey kolaylaştırıcısı",
-                    purpose="Ortak çalışmadan tek ve uygulanabilir nihai sonuç üret.",
-                    instructions=(
-                        "Aşağıdaki ortak görüşme Claude, Codex ve Antigravity'nin birbirlerinin "
-                        "fikirlerine yanıt verdiği çalışma kaydıdır. Ekibin vardığı uzlaşıyı, "
-                        "çözülemeyen görüş ayrılıklarını, riskleri ve önerilen eylemleri tek bir "
-                        "nihai cevapta sentezle. Yeni ve bağlantısız bir çözüm üretme.\n\n"
-                        "ORTAK KONUŞMA:\n" + "\n\n".join(transcript_parts)
-                    ),
+            supervisor = self.supervisor or CollaborationSupervisor(
+                SupervisorPolicy(timeout_seconds=plan.policy.timeout_seconds)
+            )
+            outcome = await supervisor.monitor(
+                expected_agents=list(session.event_names.values()),
+                poll_events=lambda: self.collaboration_runtime.poll_events(session),
+                poll_states=lambda: self.collaboration_runtime.get_agent_states(session),
+            )
+
+            executions: list[ProviderExecution] = []
+            transcript_parts: list[str] = []
+            for role, subtask in zip(roles, plan.subtasks, strict=True):
+                transcript = await self.collaboration_runtime.get_transcript(session, role.name)
+                event_name = session.event_names[role.name]
+                messages = [
+                    event.content
+                    for event in outcome.events
+                    if event.agent == event_name and event.content.strip()
+                ]
+                summary = transcript.strip() or "\n".join(messages).strip()
+                participated = event_name in outcome.participants
+                status = ExecutionStatus.SUCCESS if participated else ExecutionStatus.FAILED
+                executions.append(
+                    ProviderExecution(
+                        run_id=subtask.subtask_id,
+                        provider=subtask.assigned_provider or "codex",
+                        status=status,
+                        duration_ms=max(0, round((time.monotonic() - started) * 1000)),
+                        result=(
+                            TaskResult(
+                                summary=summary or "Ajan geçerli çıktı üretmedi.",
+                                status="success",
+                                metadata={
+                                    "role": subtask.role,
+                                    "purpose": subtask.purpose,
+                                    "hcom_agent": event_name,
+                                },
+                            )
+                            if participated
+                            else None
+                        ),
+                        error=None if participated else "Ajan geçerli çıktı üretmedi.",
+                    )
                 )
-                try:
-                    finalizer_execution = await finalizer.execute(
-                        finalizer_task, context, plan.policy
+                if participated and summary:
+                    transcript_parts.append(
+                        f"### {subtask.role} ({subtask.assigned_provider})\n{summary}"
                     )
-                except Exception:
-                    finalizer_execution = None
 
-            if (
-                finalizer_execution is not None
-                and finalizer_execution.status == ExecutionStatus.SUCCESS
-                and finalizer_execution.result
-            ):
-                executions.append(finalizer_execution)
-                final_summary = finalizer_execution.result.summary
-            else:
-                last_result = successful[-1].result
-                assert last_result is not None
-                final_summary = last_result.summary
-
-            provider_count = len(successful_providers)
+            consensus_messages = [
+                event.content.replace("VOLTRAN_CONSENSUS", "").strip()
+                for event in outcome.events
+                if event.agent in outcome.participants and "VOLTRAN_CONSENSUS" in event.content
+            ]
+            final_summary = next(
+                (message for message in reversed(consensus_messages) if message),
+                "\n\n".join(transcript_parts) or outcome.reason,
+            )
+            successful_count = sum(
+                execution.status is ExecutionStatus.SUCCESS for execution in executions
+            )
             synthesis = CouncilSynthesis(
-                consensus=[
-                    f"{provider_count} sağlayıcı ortak transkript üzerinde iki tur çalıştı."
-                ],
-                disagreements=[
-                    "Nihai metinde belirtilen açık görüş ayrılıkları kullanıcı "
-                    "değerlendirmesine sunuldu."
-                ],
-                confidence_score=0.90 if provider_count >= 3 else 0.75,
+                consensus=[outcome.reason] if outcome.status is SupervisionStatus.COMPLETED else [],
+                disagreements=(
+                    []
+                    if outcome.consensus_reached
+                    else ["Açık VOLTRAN_CONSENSUS işareti oluşmadı."]
+                ),
+                confidence_score=(
+                    0.9
+                    if outcome.consensus_reached and successful_count >= 3
+                    else 0.75
+                    if outcome.status is SupervisionStatus.COMPLETED
+                    else 0.4
+                ),
                 confidence_rationale=(
-                    f"{provider_count} farklı sağlayıcı birbirlerinin mesajlarını görerek "
-                    "ortak çözümü geliştirdi."
+                    f"{successful_count} ajan canlı hcom oturumunda mesaj ve durum "
+                    "olayları üzerinden izlendi."
                 ),
             )
-        elif len(successful) >= 1:
-            res = successful[0].result
-            final_summary = res.summary if res else ""
-            synthesis = CouncilSynthesis(
-                consensus=["Tek bir model başarıyla sonuç üretebildi."],
-                disagreements=["Diğer çalışma ortakları başarısız oldu veya zaman aşımına uğradı."],
-                confidence_score=0.60,
-                confidence_rationale="Yalnızca tek model çıktısı mevcut (kısmi başarı).",
+            return ExecutionReport(
+                run_id=run_id,
+                task_prompt=prompt,
+                mode=plan.mode,
+                plan=plan,
+                executions=executions,
+                final_summary=final_summary,
+                synthesis=synthesis,
+                next_step_recommendation=(
+                    "Canlı konsey kararını doğrulayın ve önerilen eylemleri uygulayın."
+                ),
+                total_duration_ms=max(0, round((time.monotonic() - started) * 1000)),
             )
-        else:
-            errors = [e.error or "Bilinmeyen hata" for e in executions]
-            final_summary = (
-                "Konsey modellerinin hiçbiri geçerli bir yanıt üretemedi:\n" + "\n".join(errors)
+        except (HcomClientError, OSError, RuntimeError, ValueError) as exc:
+            return self._council_failure_report(
+                run_id=run_id,
+                prompt=prompt,
+                plan=plan,
+                started=started,
+                error=f"Canlı konsey başlatılamadı: {exc}",
             )
-            synthesis = CouncilSynthesis(
-                confidence_score=0.0,
-                confidence_rationale="Tüm sağlayıcı çağrıları başarısız oldu.",
-            )
+        finally:
+            if session is not None:
+                await self.collaboration_runtime.terminate_session(session)
 
-        total_duration = max(0, round((time.monotonic() - started) * 1000))
+    @staticmethod
+    def _council_failure_report(
+        *,
+        run_id: str,
+        prompt: str,
+        plan: TaskPlan,
+        started: float,
+        error: str,
+    ) -> ExecutionReport:
+        execution = ProviderExecution(
+            run_id=run_id,
+            provider="hcom",
+            status=ExecutionStatus.FAILED,
+            duration_ms=max(0, round((time.monotonic() - started) * 1000)),
+            error=error,
+        )
         return ExecutionReport(
             run_id=run_id,
             task_prompt=prompt,
             mode=plan.mode,
             plan=plan,
-            executions=list(executions),
-            final_summary=final_summary,
-            synthesis=synthesis,
-            next_step_recommendation=(
-                "Konseyin ortak kararını doğrulayın ve önerilen eylemleri uygulayın."
+            executions=[execution],
+            final_summary=error,
+            synthesis=CouncilSynthesis(
+                confidence_score=0.0,
+                confidence_rationale="Canlı hcom işbirliği oturumu kurulamadı.",
             ),
-            total_duration_ms=total_duration,
+            next_step_recommendation="hcom kurulumunu ve sağlayıcı oturumlarını kontrol edin.",
+            total_duration_ms=execution.duration_ms,
         )

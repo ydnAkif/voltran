@@ -74,6 +74,11 @@ class CliProviderAdapter(ABC):
         executable = self._finder(self.executable) or self.executable
         return tuple(self._build_command(executable, task, policy))
 
+    def _encode_input(self, prompt: str) -> bytes:
+        """Sağlayıcının stdin protokolüne uygun istek gövdesini üret."""
+
+        return prompt.encode()
+
     async def health_check(self) -> ProviderHealth:
         executable = self._finder(self.executable)
         if executable is None:
@@ -177,7 +182,7 @@ class CliProviderAdapter(ABC):
         self._active[run_id] = process
         try:
             stdout, stderr = await asyncio.wait_for(
-                process.communicate(prompt.encode()),
+                process.communicate(self._encode_input(prompt)),
                 timeout=policy.timeout_seconds,
             )
         except TimeoutError:
@@ -210,7 +215,11 @@ class CliProviderAdapter(ABC):
         output = stdout.decode(errors="replace")[: policy.max_output_chars]
         error_output = stderr.decode(errors="replace")
         if process.returncode != 0:
-            message = _safe_error(error_output) or "Sağlayıcı komutu başarısız oldu."
+            message = (
+                _safe_error(error_output)
+                or _safe_error(output)
+                or "Sağlayıcı komutu başarısız oldu."
+            )
             return ProviderExecution(
                 run_id=run_id,
                 provider=self.key,
@@ -223,6 +232,15 @@ class CliProviderAdapter(ABC):
             return self._execution_error(run_id, started, "Sağlayıcı boş çıktı döndürdü.")
 
         result = self.normalize_result(output)
+        if result.status != "success":
+            return ProviderExecution(
+                run_id=run_id,
+                provider=self.key,
+                status=ExecutionStatus.FAILED,
+                duration_ms=self._duration_ms(started),
+                exit_code=process.returncode,
+                error=_safe_error(result.summary) or "Sağlayıcı hata sonucu döndürdü.",
+            )
         result.metadata = {**result.metadata, "provider": self.key}
         return ProviderExecution(
             run_id=run_id,

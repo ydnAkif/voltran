@@ -52,6 +52,8 @@ PROVIDERS = (
     ),
 )
 
+HCOM_INSTALL_COMMAND = "brew install aannoo/hcom/hcom"
+
 _EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _SECRET_PATTERN = re.compile(r"(?i)\b(?:bearer\s+)?(?:sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9_-]{32,})\b")
 
@@ -154,6 +156,49 @@ def _configured_directories() -> tuple[tuple[str, Path, str], ...]:
     return (
         ("Yapılandırma dizini", config_dir, "filesystem.config"),
         ("Veri dizini", data_dir, "filesystem.data"),
+    )
+
+
+def _hcom_check(
+    *,
+    finder: ExecutableFinder,
+    runner: CommandRunner,
+    timeout: float,
+) -> DoctorCheck:
+    """Canlı council modu için gereken hcom çalışma motorunu denetle."""
+
+    executable = finder("hcom")
+    if executable is None:
+        return DoctorCheck(
+            check_id="runtime.hcom",
+            title="hcom işbirliği motoru",
+            status=CheckStatus.WARNING,
+            summary="Bulunamadı; council modu kullanılamaz",
+            details={"required_for": "council"},
+            remediation=f"hcom'u kurun: {HCOM_INSTALL_COMMAND}",
+        )
+
+    version_result = runner(executable, ("--version",), timeout)
+    if version_result.timed_out:
+        status = CheckStatus.WARNING
+        summary = "Sürüm kontrolü zaman aşımına uğradı"
+        remediation = "hcom kurulumunu ve PATH ayarını kontrol edin."
+    elif version_result.returncode == 0:
+        status = CheckStatus.PASS
+        summary = _safe_output(version_result.stdout) or "Kurulu"
+        remediation = None
+    else:
+        status = CheckStatus.WARNING
+        summary = "Çalıştırılamadı"
+        remediation = f"hcom'u yeniden kurun: {HCOM_INSTALL_COMMAND}"
+
+    return DoctorCheck(
+        check_id="runtime.hcom",
+        title="hcom işbirliği motoru",
+        status=status,
+        summary=summary,
+        details={"executable": executable, "required_for": "council"},
+        remediation=remediation,
     )
 
 
@@ -267,6 +312,7 @@ def build_doctor_report(
     checks.extend(
         _directory_check(name, path, check_id) for name, path, check_id in _configured_directories()
     )
+    checks.append(_hcom_check(finder=finder, runner=runner, timeout=timeout))
     for provider in PROVIDERS:
         checks.extend(
             _provider_checks(

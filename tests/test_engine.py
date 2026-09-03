@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from typing import cast
 
+from voltran.collaboration import AgentRole, CollaborationRuntime, CollaborationSession
 from voltran.engine import ExecutionEngine
+from voltran.hcom_client import HcomAgentInfo, HcomClient, HcomClientError, HcomEvent
 from voltran.models import (
     ExecutionMode,
     ExecutionPolicy,
@@ -16,6 +20,11 @@ from voltran.models import (
     TaskResult,
 )
 from voltran.providers import ProviderAdapter
+from voltran.supervisor import (
+    CollaborationSupervisor,
+    SupervisionOutcome,
+    SupervisionStatus,
+)
 
 
 class _DummyAdapter:
@@ -101,17 +110,105 @@ def test_engine_executes_single_mode_forwarding_subtask_role() -> None:
     asyncio.run(scenario())
 
 
-def test_engine_executes_council_as_shared_multi_round_conversation() -> None:
+class _FakeCollaborationRuntime:
+    def __init__(self, *, available: bool = True, fail_start: bool = False) -> None:
+        self.available = available
+        self.fail_start = fail_start
+        self.sent_roles: list[str] = []
+        self.terminated = False
+        self.session: CollaborationSession | None = None
+
+    def is_available(self) -> bool:
+        return self.available
+
+    async def start_session(
+        self,
+        task_prompt: str,
+        roles: list[AgentRole],
+        *,
+        working_dir: Path | None = None,
+        headless: bool = True,
+        allow_writes: bool = False,
+    ) -> CollaborationSession:
+        del headless, allow_writes
+
+        if self.fail_start:
+            raise HcomClientError("başlatma hatası")
+        session = CollaborationSession(
+            session_id="test-session",
+            task_prompt=task_prompt,
+            roles=roles,
+            working_dir=working_dir or Path.cwd(),
+            client=HcomClient("fake-hcom"),
+            agent_names={
+                role.name: f"{role.name}-agent{index}" for index, role in enumerate(roles)
+            },
+            event_names={role.name: f"agent{index}" for index, role in enumerate(roles)},
+        )
+        self.session = session
+        return session
+
+    async def send_to_role(
+        self,
+        session: CollaborationSession,
+        target_role: str,
+        message: str,
+        *,
+        reply_to: str | None = None,
+    ) -> bool:
+        del session, message, reply_to
+        self.sent_roles.append(target_role)
+        return True
+
+    async def poll_events(
+        self, session: CollaborationSession, *, limit: int = 50
+    ) -> list[HcomEvent]:
+        del session, limit
+        return []
+
+    async def get_agent_states(self, session: CollaborationSession) -> list[HcomAgentInfo]:
+        return [
+            HcomAgentInfo(name=name, status="listening") for name in session.event_names.values()
+        ]
+
+    async def get_transcript(self, session: CollaborationSession, agent_name: str) -> str:
+        del session
+        return f"{agent_name} canlı katkısı"
+
+    async def terminate_session(self, session: CollaborationSession) -> None:
+        session.is_active = False
+        self.terminated = True
+
+
+class _FakeSupervisor:
+    async def monitor(self, **_: object) -> SupervisionOutcome:
+        return SupervisionOutcome(
+            status=SupervisionStatus.COMPLETED,
+            reason="Ajanlar açık uzlaşma işareti üretti.",
+            events=[
+                HcomEvent("1", "", "message", "agent0", content="İlk görüş"),
+                HcomEvent(
+                    "2",
+                    "",
+                    "message",
+                    "agent1",
+                    content="Ortak nihai karar VOLTRAN_CONSENSUS",
+                ),
+                HcomEvent("3", "", "message", "agent2", content="VOLTRAN_DONE"),
+            ],
+            participants={"agent0", "agent1", "agent2"},
+            consensus_reached=True,
+        )
+
+
+def test_engine_executes_council_through_live_collaboration_runtime() -> None:
     async def scenario() -> None:
-        claude = _DummyAdapter("claude", "Ortak Hakem Sentezi")
-        codex = _DummyAdapter("codex", "Codex mimari analizi")
-        google = _DummyAdapter("google", "Google ortak katkısı")
-        registry: dict[str, ProviderAdapter] = {
-            "claude": claude,
-            "codex": codex,
-            "google": google,
-        }
-        engine = ExecutionEngine(registry)
+        runtime = _FakeCollaborationRuntime()
+        engine = ExecutionEngine(
+            {},
+            collaboration_runtime=cast(CollaborationRuntime, runtime),
+            supervisor=cast(CollaborationSupervisor, _FakeSupervisor()),
+        )
         plan = TaskPlan(
             mode=ExecutionMode.COUNCIL,
             reasoning="konsey testi",
@@ -139,25 +236,18 @@ def test_engine_executes_council_as_shared_multi_round_conversation() -> None:
         assert report.mode == ExecutionMode.COUNCIL
         assert report.synthesis is not None
         assert report.synthesis.confidence_score >= 0.8
-        assert len(report.executions) == 7
-        assert len(claude.received_tasks) == 2
-        assert len(codex.received_tasks) == 2
-        assert len(google.received_tasks) == 3
-        # İkinci turda ilk konuşmacı bile diğer iki sağlayıcının ilk turunu görür.
-        assert "Codex mimari analizi" in claude.received_tasks[1].instructions
-        assert "Google ortak katkısı" in claude.received_tasks[1].instructions
-        assert "ORTAK KONUŞMA" in google.received_tasks[-1].instructions
+        assert len(report.executions) == 3
+        assert report.final_summary == "Ortak nihai karar"
+        assert len(runtime.sent_roles) == 3
+        assert runtime.terminated is True
 
     asyncio.run(scenario())
 
 
-def test_engine_handles_partial_failure_in_council() -> None:
+def test_engine_requires_hcom_for_council_without_static_fallback() -> None:
     async def scenario() -> None:
-        registry: dict[str, ProviderAdapter] = {
-            "claude": _DummyAdapter("claude", "Başarılı Claude çıktısı"),
-            "codex": _DummyAdapter("codex", "", fail=True),
-        }
-        engine = ExecutionEngine(registry)
+        runtime = _FakeCollaborationRuntime(available=False)
+        engine = ExecutionEngine({}, collaboration_runtime=cast(CollaborationRuntime, runtime))
         plan = TaskPlan(
             mode=ExecutionMode.COUNCIL,
             reasoning="kısmi hata testi",
@@ -169,22 +259,18 @@ def test_engine_handles_partial_failure_in_council() -> None:
 
         report = await engine.execute_plan("Test", plan)
 
-        # Sistem çökmemeli, kısmi başarıyı raporlamalı
-        assert "Başarılı Claude çıktısı" in report.final_summary
+        assert "hcom işbirliği motoru bulunamadı" in report.final_summary
         assert report.synthesis is not None
-        assert report.synthesis.confidence_score <= 0.75
-        assert any(e.status == ExecutionStatus.FAILED for e in report.executions)
+        assert report.synthesis.confidence_score == 0.0
+        assert report.executions[0].provider == "hcom"
 
     asyncio.run(scenario())
 
 
-def test_engine_handles_unexpected_exception_in_gather() -> None:
+def test_engine_terminates_partial_session_when_collaboration_fails() -> None:
     async def scenario() -> None:
-        registry: dict[str, ProviderAdapter] = {
-            "claude": _DummyAdapter("claude", "Claude sağlam"),
-            "codex": _DummyAdapter("codex", "", raise_exc=True),
-        }
-        engine = ExecutionEngine(registry)
+        runtime = _FakeCollaborationRuntime(fail_start=True)
+        engine = ExecutionEngine({}, collaboration_runtime=cast(CollaborationRuntime, runtime))
         plan = TaskPlan(
             mode=ExecutionMode.COUNCIL,
             reasoning="çökme izolasyonu",
@@ -194,13 +280,11 @@ def test_engine_handles_unexpected_exception_in_gather() -> None:
             ],
         )
 
-        # Beklenmeyen Exception fırlatan adaptör tüm council'ı düşürmemeli
         report = await engine.execute_plan("Test", plan)
 
         assert report.mode == ExecutionMode.COUNCIL
-        assert "Claude sağlam" in report.final_summary
-        failed_exec = next(e for e in report.executions if e.status == ExecutionStatus.FAILED)
-        assert "Beklenmeyen adaptör hatası" in str(failed_exec.error)
+        assert "başlatma hatası" in report.final_summary
+        assert report.executions[0].status is ExecutionStatus.FAILED
 
     asyncio.run(scenario())
 
