@@ -228,4 +228,3 @@ class ExecutionEngine:
             ),
             total_duration_ms=total_duration,
         )
-
