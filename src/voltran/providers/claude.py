@@ -38,9 +38,11 @@ class ClaudeAdapter(CliProviderAdapter):
             permission_mode,
         ]
         if policy.allowed_tools:
-            command.extend(("--allowed-tools", ",".join(policy.allowed_tools)))
+            command.extend(("--tools", ",".join(policy.allowed_tools)))
         else:
-            command.extend(("--tools", ""))
+            # Salt-okunur modda dosya inceleme ve arama araçlarını (Read,Glob,Grep) açık tut
+            tools = "default" if policy.allow_writes else "Read,Glob,Grep"
+            command.extend(("--tools", tools))
         if task.model:
             command.extend(("--model", task.model))
         return command
