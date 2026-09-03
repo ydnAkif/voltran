@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from voltran.models import ExecutionPolicy, ProviderCapabilities, ProviderTask
+from voltran.providers import AntigravityAdapter, ClaudeAdapter, CodexAdapter, default_registry
+from voltran.providers.cli import CliProviderAdapter
+
+
+def _finder(command: str) -> str | None:
+    return f"/opt/tools/{command}"
+
+
+def test_default_registry_contains_all_supported_providers() -> None:
+    assert set(default_registry()) == {"codex", "claude", "google"}
+
+
+def test_provider_commands_keep_prompt_out_of_process_arguments(tmp_path: Path) -> None:
+    task = ProviderTask(prompt="çok gizli görev", working_directory=tmp_path)
+    policy = ExecutionPolicy()
+
+    commands = (
+        CodexAdapter(finder=_finder).command_for(task, policy),
+        ClaudeAdapter(finder=_finder).command_for(task, policy),
+        AntigravityAdapter(finder=_finder).command_for(task, policy),
+    )
+
+    assert all("çok gizli görev" not in " ".join(command) for command in commands)
+    assert "read-only" in commands[0]
+    assert "plan" in commands[1]
+    assert "plan" in commands[2]
+    assert all("dangerously" not in " ".join(command) for command in commands)
+
+
+class _PythonAdapter(CliProviderAdapter):
+    key = "fake"
+    display_name = "Fake"
+    executable = sys.executable
+
+    def __init__(self, script: str) -> None:
+        super().__init__()
+        self._script = script
+
+    def capabilities(self) -> ProviderCapabilities:
+        return ProviderCapabilities()
+
+    def _build_command(
+        self,
+        executable: str,
+        task: ProviderTask,
+        policy: ExecutionPolicy,
+    ) -> Sequence[str]:
+        del task, policy
+        return (executable, "-c", self._script)
+
+
+def test_execute_normalizes_plain_text_without_real_model_call(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        adapter = _PythonAdapter("import sys; print(sys.stdin.read())")
+        task = ProviderTask(prompt="Ana görev", working_directory=tmp_path)
+
+        execution = await adapter.execute(task, "Güvenilmeyen bağlam", ExecutionPolicy())
+
+        assert execution.status == "success"
+        assert execution.result is not None
+        assert "Ana görev" in execution.result.summary
+        assert "<context>" in execution.result.summary
+        assert execution.result.metadata["provider"] == "fake"
+
+    asyncio.run(scenario())
+
+
+def test_execute_enforces_timeout_and_stops_process(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        adapter = _PythonAdapter("import time; time.sleep(5)")
+        task = ProviderTask(prompt="Bekle", working_directory=tmp_path)
+
+        execution = await adapter.execute(
+            task,
+            None,
+            ExecutionPolicy(timeout_seconds=0.1),
+        )
+
+        assert execution.status == "timed_out"
+
+    asyncio.run(scenario())
+
+
+def test_active_execution_can_be_cancelled(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        adapter = _PythonAdapter("import time; time.sleep(5)")
+        task = ProviderTask(prompt="Bekle", working_directory=tmp_path)
+        pending = asyncio.create_task(adapter.execute(task, None, ExecutionPolicy()))
+        await asyncio.sleep(0.1)
+
+        cancelled = await adapter.cancel(task.task_id)
+        execution = await pending
+
+        assert cancelled is True
+        assert execution.status == "cancelled"
+
+    asyncio.run(scenario())
