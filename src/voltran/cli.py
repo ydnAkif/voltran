@@ -308,3 +308,27 @@ def bench(
         )
 
     console.print(table)
+
+
+@app.command()
+def dashboard(
+    once: Annotated[
+        bool,
+        typer.Option("--once", help="Sürekli yenileme yerine tek seferlik göster ve çık."),
+    ] = False,
+    refresh_rate: Annotated[
+        float,
+        typer.Option(help="Yenileme aralığı (saniye cinsinden)."),
+    ] = 1.0,
+) -> None:
+    """Canlı çoklu ajan izleme panelini (TUI Dashboard) başlat."""
+    from voltran.dashboard import DashboardView
+
+    view = DashboardView()
+    if once:
+        console.print(view.render_once())
+    else:
+        try:
+            view.run_live(refresh_rate=refresh_rate, console=console)
+        except KeyboardInterrupt:
+            console.print("\n[dim]Gösterge paneli kapatıldı.[/dim]")

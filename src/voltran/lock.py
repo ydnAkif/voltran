@@ -105,3 +105,27 @@ class FileLockManager:
                         lock_file.unlink(missing_ok=True)
                 except (json.JSONDecodeError, OSError):
                     lock_file.unlink(missing_ok=True)
+
+    def list_active_locks(self) -> list[LockInfo]:
+        """Mevcut tüm aktif dosya kilitlerini döndürür."""
+        if not self.lock_dir.exists():
+            return []
+
+        locks: list[LockInfo] = []
+        for lock_file in self.lock_dir.glob("*.lock"):
+            try:
+                data = json.loads(lock_file.read_text(encoding="utf-8"))
+                file_path = str(data.get("file_path", ""))
+                holder = str(data.get("holder", ""))
+                acquired_at = float(data.get("acquired_at", 0.0))
+                if file_path and holder:
+                    locks.append(
+                        LockInfo(
+                            file_path=file_path,
+                            holder=holder,
+                            acquired_at=acquired_at,
+                        )
+                    )
+            except (json.JSONDecodeError, OSError, ValueError):
+                continue
+        return locks

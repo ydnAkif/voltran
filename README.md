@@ -169,6 +169,16 @@ Apple Silicon Mac'inize `uv`, `hcom` ve `voltran`'ı tek seferde kurmak için:
 ./scripts/install.sh
 ```
 
+### 🖥️ Canlı Terminal Gösterge Paneli (`voltran dashboard`)
+Aktif ajanları, mesajlaşma akışını, dosya kilitlerini ve geçmişi canlı izler:
+```bash
+# Etkileşimli canlı gösterge paneli (Ctrl+C ile çıkış):
+uv run voltran dashboard
+
+# Tek seferlik anlık durum dökümü:
+uv run voltran dashboard --once
+```
+
 ### 📜 Çalışma Geçmişi (`voltran history`)
 Yerel SQLite veritabanındaki son çalışmaları listeler:
 ```bash
@@ -222,7 +232,8 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] Dosya kilitleme ve sapma denetimi (`FileLockManager` ve `--write` ile çakışma önleme)
 - [x] Görev bazlı değerlendirme seti (`voltran bench`)
 - [x] Paketleme ve tek komutluk macOS kurulumu (`scripts/install.sh`)
-- [ ] İsteğe bağlı SwiftUI / TUI arayüz
+- [x] Canlı Terminal İzleme Paneli (TUI Dashboard — `voltran dashboard`)
+
 
 
 
