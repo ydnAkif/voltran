@@ -1,11 +1,36 @@
 # VOLTRAN
 
 [![CI](https://github.com/ydnAkif/voltran/actions/workflows/ci.yml/badge.svg)](https://github.com/ydnAkif/voltran/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-black.svg)]()
 
-**Birden fazla yapay zekâ modelini, tek bir görevin uzman parçaları olarak birleştiren yerel orkestrasyon sistemi.**
+**Birden fazla yapay zekâ modelini (Codex, Claude, Google Antigravity), tek bir görevin uzman parçaları olarak birleştiren yerel orkestrasyon sistemi.**
 
+> **Tek Komutla Kurulum:**
+> ```bash
+> ./scripts/install.sh
+> ```
+
+---
+
+## İçindekiler
+- [Projenin Amacı](#projenin-amacı)
+- [Temel Çalışma Biçimi ve Roller](#temel-çalışma-biçimi)
+- [Çalışma Modları](#çalışma-modları)
+- [Kullanım ve Komutlar](#kullanım-ve-komutlar)
+  - [Sistem Teşhisi (`voltran doctor`)](#-sistem-teşhisi-voltran-doctor)
+  - [Görev Yürütme (`voltran run`)](#-görev-yürütme-voltran-run)
+  - [Canlı Terminal Paneli (`voltran dashboard`)](#️-canlı-terminal-gösterge-paneli-voltran-dashboard)
+  - [Model Kıyaslama (`voltran bench`)](#-görev-bazlı-kıyaslama-ve-değerlendirme-voltran-bench)
+  - [Geçmiş Kayıtları (`voltran history`)](#-çalışma-geçmişi-voltran-history)
+- [Tasarım İlkeleri ve Güvenlik](#tasarım-ilkeleri)
+- [Yol Haritası](#yol-haritası)
+
+---
 
 VOLTRAN; kullanıcıdan tek bir görev alır, görevi uygun uzmanlara böler, sonuçları kontrollü turlarla karşılaştırır ve tek bir denetlenebilir cevap üretir. Amaç, üç modele aynı soruyu sorup üç ayrı cevap göstermek değil; her modeli gerçekten katkı sağlayacağı yerde kullanmaktır.
+
 
 ## Projenin amacı
 
