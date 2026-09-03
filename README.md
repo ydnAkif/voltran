@@ -52,7 +52,10 @@ Komutan, göreve en uygun bir veya iki uzmanı çağırır. Kodlama, teknik teş
 
 ### `council` — Voltran Konsey
 
-Birden fazla sağlayıcı bağımsız çözüm üretir; ardından eleştiri ve hakem turu yapılır. Finans, önemli kararlar, mimari tasarım ve yüksek doğruluk gereken işler için.
+Claude, Codex ve Google Antigravity ortak bir konuşma kaydı üzerinde tur bazlı olarak
+çalışır. Her sağlayıcı diğerlerinin görüşlerini okuyup yanıtlar, çözümü geliştirir ve ekip
+tek bir uygulanabilir sonuç üretir. Finans, önemli kararlar, mimari tasarım ve yüksek
+doğruluk gereken işler için.
 
 ### `visual` — Voltran Görsel
 
@@ -117,12 +120,26 @@ uv run voltran run "Sistem mimarisini karşılaştır ve riskleri listele"
 # Kota harcamadan plan ve sağlayıcı dağılımını önizleme:
 uv run voltran run "Veritabanı şemasını optimize et" --dry-run --explain
 
-# Belirli bir modda ve bağlam dosyasıyla çalıştırma:
-uv run voltran run --mode council --file app.py "Bu kodun güvenlik açıklarını incele"
+# Belirli bir modda, zaman aşımı ve bağlam dosyasıyla çalıştırma:
+uv run voltran run -m council --timeout 60 "Sistem mimarisini karşılaştır ve riskleri listele"
+uv run voltran run --mode expert --file app.py "Bu kodun güvenlik açıklarını incele"
 
 # Sonuç raporunu Markdown dosyasına veya JSON formatına kaydetme:
 uv run voltran run "JSON çıktısını özetle" --mode quick --output rapor.md
 uv run voltran run "Hızlı analiz" --json
+```
+
+### 💡 Kolay Erişim (Global Kurulum)
+`uv run` yazmadan doğrudan `voltran` komutunu kullanmak isterseniz:
+```bash
+uv tool install . --force
+# veya geliştirme modunda:
+pip install -e .
+```
+Artık terminalden doğrudan çalıştırabilirsiniz:
+```bash
+voltran run -m council "Mimariyi karşılaştır"
+voltran history
 ```
 
 ### 📜 Çalışma Geçmişi (`voltran history`)
@@ -145,6 +162,7 @@ voltran config
 uv sync --extra dev
 uv run ruff check .
 uv run ruff format --check .
+uv run pyright
 uv run pytest -v
 ```
 
@@ -159,7 +177,7 @@ VOLTRAN, bir dosyayı birden fazla sağlayıcıya gönderdiğinde veri fiilen bi
 4. Kullanılacak sağlayıcıları işlem öncesinde göster.
 5. Kullanıcı onayı yoksa kapsamı genişletme.
 
-Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çalışma kayıtlarına yazılmaz.
+Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çalışma kayıtlarına yazılmaz; yerel SQLite veritabanına kaydedilmeden önce otomatik olarak maskelenir (`[REDACTED_API_KEY]`, `[REDACTED_TOKEN]`, `[REDACTED_EMAIL]`, `[REDACTED_CARD]`).
 
 ## Yol haritası
 
@@ -170,12 +188,14 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 - [x] Ortak sağlayıcı adaptör arayüzü
 - [x] Codex, Claude ve Google Antigravity CLI adaptörleri
 - [x] Router ve çalışma modları (`quick`, `expert`, `council`)
-- [x] Eleştiri ve hakem sentezi akışı
+- [x] Üç sağlayıcılı, ortak transkriptli konsey görüşmesi
 - [x] Yerel SQLite çalışma geçmişi (`voltran history`)
-- [ ] Gizlilik politikaları ve gelişmiş veri maskeleme
+- [x] Gizlilik koruması ve veri maskeleme (API key, token, PII)
+- [x] Hata ve zaman aşımı izolasyonu (`--timeout`, süreç iptali)
 - [ ] Görev bazlı değerlendirme seti
 - [ ] Paketleme ve tek komutluk macOS kurulumu
 - [ ] İsteğe bağlı SwiftUI arayüz
+
 
 ## Resmî teknik dayanaklar
 
@@ -189,4 +209,3 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 ## Durum
 
 Çekirdek orkestrasyon mekanizması (`quick`, `expert`, `council` modları, komutan, yönlendirici ve tek sonuç raporlama) tamamlanmıştır. `voltran run` ve `voltran history` komutları yerel olarak test edilebilir durumdadır.
-

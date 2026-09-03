@@ -66,6 +66,13 @@ class Reporter:
 
         lines.append("")
 
+        failed = [execution for execution in report.executions if execution.error]
+        if failed:
+            lines.extend(["### Sağlayıcı Hataları", ""])
+            for execution in failed:
+                lines.append(f"- **{execution.provider.capitalize()}:** {execution.error}")
+            lines.append("")
+
         if report.next_step_recommendation:
             lines.extend(
                 [

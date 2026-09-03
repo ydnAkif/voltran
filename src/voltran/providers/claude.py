@@ -34,6 +34,9 @@ class ClaudeAdapter(CliProviderAdapter):
             "--output-format",
             "text",
             "--no-session-persistence",
+            "--safe-mode",
+            "--disable-slash-commands",
+            "--no-chrome",
             "--permission-mode",
             permission_mode,
         ]

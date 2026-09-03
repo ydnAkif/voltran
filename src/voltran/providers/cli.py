@@ -116,7 +116,11 @@ class CliProviderAdapter(ABC):
 
     @staticmethod
     def _compose_input(task: ProviderTask, context: str | None) -> str:
-        parts: list[str] = []
+        parts: list[str] = [
+            "YALITILMIŞ GÖREV: Yalnızca aşağıdaki ana görev ve açıkça verilen bağlam üzerinde "
+            "çalış. Önceki oturum, hafıza, başka proje veya çalışma alanlarından gelen ilgisiz "
+            "bilgileri kullanma."
+        ]
         if task.role:
             parts.append(f"GÖREVDEKİ ROLÜNÜZ: {task.role}")
         if task.purpose:

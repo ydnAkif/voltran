@@ -32,6 +32,7 @@ class AntigravityAdapter(CliProviderAdapter):
             executable,
             "--output-format",
             "text",
+            "--new-project",
             "--mode",
             mode,
             "--sandbox",

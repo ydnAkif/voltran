@@ -32,6 +32,8 @@ def test_provider_commands_keep_prompt_out_of_process_arguments(tmp_path: Path) 
     assert "read-only" in commands[0]
     assert "plan" in commands[1]
     assert "plan" in commands[2]
+    assert "--safe-mode" in commands[1]
+    assert "--new-project" in commands[2]
     assert all("dangerously" not in " ".join(command) for command in commands)
 
 

@@ -110,18 +110,23 @@ Bağımsız alt görevler eşzamanlı yürütülebilmeli; bir sağlayıcının h
 
 ### FR-08 — Kontrollü model iletişimi
 
-Modeller doğrudan ve sınırsız sohbet etmemelidir. Orkestratör, yalnızca gerekli özetleri ve yapılandırılmış çıktıları bir sonraki tura aktarmalıdır.
+`council` modunda Claude, Codex ve Google Antigravity aynı orkestratör kontrollü konuşma
+kaydını görmelidir. Her sağlayıcı diğerlerinin mesajlarına yanıt vermeli, itirazlarını
+belirtmeli ve ortak çözümü geliştirmelidir. Konuşma sınırsız olmamalı; aktarılan mesajların
+boyutu ve tur sayısı orkestratör tarafından sınırlandırılmalıdır.
 
 Varsayılan sınırlar:
 
-- çözüm turu: 1
-- eleştiri turu: 1
-- hakem turu: 1
+- ortak çalışma turu: 2
+- nihai karar kaydı: 1
 - kullanıcı onayı olmadan ek tur: 0
 
-### FR-09 — Eleştiri ve hakem
+### FR-09 — Ortak çalışma ve sentez
 
-`council` modunda en az iki bağımsız aday sonuç üretilebilmeli, bir eleştiri adımı uygulanmalı ve son sentezde anlaşmazlıklar korunmalıdır. Hakem, çoğunluk görüşünü otomatik olarak doğru kabul etmemelidir.
+`council` modunda üç sağlayıcı aynı görev üzerinde beraber çalışmalı; her biri en az bir
+diğer sağlayıcının katkısını görerek yanıt üretmelidir. Nihai sentez ortak konuşmaya
+dayanmalı ve çözülemeyen anlaşmazlıkları korumalıdır. Çoğunluk görüşü otomatik olarak
+doğru kabul edilmemelidir.
 
 ### FR-10 — Çıktı sözleşmesi
 
@@ -266,7 +271,7 @@ MVP aşağıdaki senaryo başarıyla tamamlandığında hazır kabul edilir:
 2. Kullanıcı tek bir görev girer.
 3. Sistem görevi sınıflandırır ve mod önerir.
 4. En az iki farklı sağlayıcı adaptörü başarıyla çağrılabilir.
-5. `council` modunda bağımsız sonuçlar ve bir eleştiri turu oluşturulur.
+5. `council` modunda üç sağlayıcı ortak transkript üzerinde en az iki tur çalışır.
 6. Tek bir Markdown raporunda sonuç, anlaşmazlık ve güven düzeyi gösterilir.
 7. Sağlayıcılardan biri başarısız olduğunda çalışma kontrollü biçimde devam eder veya anlaşılır biçimde durur.
 8. Günlüklerde gizli bilgi bulunmadığını doğrulayan test geçer.
@@ -306,9 +311,9 @@ MVP aşağıdaki senaryo başarıyla tamamlandığında hazır kabul edilir:
 
 ### Aşama 4 — Konsey
 
-- bağımsız aday üretimi
-- eleştiri
-- hakem/sentez
+- üç sağlayıcılı ortak konuşma
+- karşılıklı eleştiri ve geliştirme turları
+- ortak karar sentezi
 - güven ve anlaşmazlık raporu
 
 ### Aşama 5 — Güvenlik ve değerlendirme

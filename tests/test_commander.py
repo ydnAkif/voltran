@@ -51,7 +51,8 @@ def test_commander_creates_plan_with_subtasks(tmp_path: Path) -> None:
     )
 
     assert plan.mode == ExecutionMode.COUNCIL
-    assert len(plan.subtasks) == 2
+    assert len(plan.subtasks) == 3
     assert plan.context_file == context_file
-    assert plan.subtasks[0].role == "birinci_uzman"
-    assert plan.subtasks[1].role == "ikinci_uzman"
+    assert plan.subtasks[0].role == "Claude çalışma ortağı"
+    assert plan.subtasks[1].role == "Codex çalışma ortağı"
+    assert plan.subtasks[2].role == "Antigravity çalışma ortağı"

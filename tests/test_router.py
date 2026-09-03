@@ -55,13 +55,14 @@ def test_router_assigns_distinct_providers_for_council() -> None:
         subtasks=[
             SubTask(role="uzman_1", purpose="p1"),
             SubTask(role="uzman_2", purpose="p2"),
+            SubTask(role="uzman_3", purpose="p3"),
         ],
     )
 
     assigned_plan = router.assign_providers(plan)
 
     assigned = [st.assigned_provider for st in assigned_plan.subtasks]
-    assert len(set(assigned)) == 2
+    assert len(set(assigned)) == 3
     assert all(p in registry for p in assigned)
 
 

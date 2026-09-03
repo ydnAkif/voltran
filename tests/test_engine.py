@@ -101,11 +101,16 @@ def test_engine_executes_single_mode_forwarding_subtask_role() -> None:
     asyncio.run(scenario())
 
 
-def test_engine_executes_council_with_judge_synthesis() -> None:
+def test_engine_executes_council_as_shared_multi_round_conversation() -> None:
     async def scenario() -> None:
         claude = _DummyAdapter("claude", "Ortak Hakem Sentezi")
         codex = _DummyAdapter("codex", "Codex mimari analizi")
-        registry: dict[str, ProviderAdapter] = {"claude": claude, "codex": codex}
+        google = _DummyAdapter("google", "Google ortak katkısı")
+        registry: dict[str, ProviderAdapter] = {
+            "claude": claude,
+            "codex": codex,
+            "google": google,
+        }
         engine = ExecutionEngine(registry)
         plan = TaskPlan(
             mode=ExecutionMode.COUNCIL,
@@ -121,6 +126,11 @@ def test_engine_executes_council_with_judge_synthesis() -> None:
                     purpose="Monolit odaklı plan",
                     assigned_provider="codex",
                 ),
+                SubTask(
+                    role="Mimar C",
+                    purpose="Ortak çözümü geliştir",
+                    assigned_provider="google",
+                ),
             ],
         )
 
@@ -129,9 +139,14 @@ def test_engine_executes_council_with_judge_synthesis() -> None:
         assert report.mode == ExecutionMode.COUNCIL
         assert report.synthesis is not None
         assert report.synthesis.confidence_score >= 0.8
-        # Claude hem uzman hem hakem olarak çalıştırıldı
-        assert len(report.executions) == 3
-        assert "Ortak Hakem Sentezi" in report.final_summary
+        assert len(report.executions) == 7
+        assert len(claude.received_tasks) == 2
+        assert len(codex.received_tasks) == 2
+        assert len(google.received_tasks) == 3
+        # İkinci turda ilk konuşmacı bile diğer iki sağlayıcının ilk turunu görür.
+        assert "Codex mimari analizi" in claude.received_tasks[1].instructions
+        assert "Google ortak katkısı" in claude.received_tasks[1].instructions
+        assert "ORTAK KONUŞMA" in google.received_tasks[-1].instructions
 
     asyncio.run(scenario())
 

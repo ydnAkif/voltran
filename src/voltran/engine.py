@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from uuid import uuid4
 
@@ -156,9 +155,14 @@ class ExecutionEngine:
         context: str | None,
         started: float,
     ) -> ExecutionReport:
-        """Council modunda bağımsız uzmanları paralel çalıştırıp hakem turuyla sentezler."""
+        """Sağlayıcıları ortak transkript üzerinden, tur bazlı olarak birlikte çalıştırır."""
 
-        async def _run_subtask(subtask: SubTask) -> ProviderExecution:
+        async def _run_subtask(
+            subtask: SubTask,
+            *,
+            round_number: int,
+            transcript: str,
+        ) -> ProviderExecution:
             provider_key = subtask.assigned_provider or "codex"
             adapter = self.registry.get(provider_key)
             if adapter is None:
@@ -175,122 +179,115 @@ class ExecutionEngine:
                 role=subtask.role,
                 purpose=subtask.purpose,
                 model=subtask.model,
+                instructions=(
+                    "ORTAK ÇALIŞMA PROTOKOLÜ:\n"
+                    f"Bu, konsey görüşmesinin {round_number}. turudur. "
+                    "Aşağıdaki ortak konuşmayı dikkatle oku; diğer çalışma ortaklarının "
+                    "fikirlerine doğrudan yanıt ver, katıldığın ve itiraz ettiğin noktaları "
+                    "belirt, eksikleri tamamla ve ekibi uygulanabilir tek bir sonuca yaklaştır. "
+                    "Önceki cevapları yalnızca tekrar etme.\n\n"
+                    f"ORTAK KONUŞMA:\n{transcript or '[Henüz mesaj yok]'}"
+                ),
             )
             res = await adapter.execute(task, context, plan.policy)
             if res.result:
                 res.result.metadata["role"] = subtask.role
                 res.result.metadata["purpose"] = subtask.purpose
+                res.result.metadata["round"] = round_number
             return res
 
-        tasks = [_run_subtask(st) for st in plan.subtasks]
-        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        # İki tur kullanılır: ilk turda görüşler oluşur; ikinci turda her sağlayıcı,
+        # diğerlerinin mesajlarını da görerek ortak çözümü geliştirir.
         executions: list[ProviderExecution] = []
-        for idx, res in enumerate(raw_results):
-            if isinstance(res, BaseException):
-                st = plan.subtasks[idx]
-                executions.append(
-                    ProviderExecution(
+        transcript_parts: list[str] = []
+        for round_number in (1, 2):
+            for st in plan.subtasks:
+                try:
+                    execution = await _run_subtask(
+                        st,
+                        round_number=round_number,
+                        transcript="\n\n".join(transcript_parts),
+                    )
+                except Exception as exc:
+                    execution = ProviderExecution(
                         run_id=st.subtask_id,
                         provider=st.assigned_provider or "unknown",
                         status=ExecutionStatus.FAILED,
                         duration_ms=0,
-                        error=f"Beklenmeyen adaptör hatası: {type(res).__name__}: {res}",
+                        error=f"Beklenmeyen adaptör hatası: {type(exc).__name__}: {exc}",
                     )
-                )
-            else:
-                executions.append(res)
+                executions.append(execution)
+                if execution.status == ExecutionStatus.SUCCESS and execution.result:
+                    # Ortak bağlamın kontrolsüz büyümesini engelle; tam çıktı raporda kalır.
+                    excerpt = execution.result.summary[:20_000]
+                    transcript_parts.append(
+                        f"### Tur {round_number} — {st.role} "
+                        f"({execution.provider.upper()})\n{excerpt}"
+                    )
 
         successful = [e for e in executions if e.status == ExecutionStatus.SUCCESS and e.result]
+        successful_providers = {e.provider for e in successful}
         synthesis: CouncilSynthesis
 
-        if len(successful) >= 2:
-            # 2. Tur: Hakem (Judge) çağrısı ile gerçek eleştiri ve sentez
-            judge_key = next(
-                (k for k in ("claude", "codex", "google") if k in self.registry),
-                successful[0].provider,
-            )
-            judge_adapter = self.registry.get(judge_key)
-
-            candidate_sections: list[str] = []
-            for i, e in enumerate(successful, 1):
-                role_name = (
-                    e.result.metadata.get("role", f"Uzman {i}") if e.result else f"Uzman {i}"
+        if len(successful_providers) >= 2:
+            # Son konuşmacı, tüm ortak transkripti görmüş durumdadır ve ekip adına
+            # karar kaydı üretir. Bu bir bağımsız hakem değil, ortak çalışmanın son adımıdır.
+            finalizer_execution: ProviderExecution | None = None
+            finalizer_key = successful[-1].provider
+            finalizer = self.registry.get(finalizer_key)
+            if finalizer is not None:
+                finalizer_task = ProviderTask(
+                    prompt=prompt,
+                    role="Konsey kolaylaştırıcısı",
+                    purpose="Ortak çalışmadan tek ve uygulanabilir nihai sonuç üret.",
+                    instructions=(
+                        "Aşağıdaki ortak görüşme Claude, Codex ve Antigravity'nin birbirlerinin "
+                        "fikirlerine yanıt verdiği çalışma kaydıdır. Ekibin vardığı uzlaşıyı, "
+                        "çözülemeyen görüş ayrılıklarını, riskleri ve önerilen eylemleri tek bir "
+                        "nihai cevapta sentezle. Yeni ve bağlantısız bir çözüm üretme.\n\n"
+                        "ORTAK KONUŞMA:\n" + "\n\n".join(transcript_parts)
+                    ),
                 )
-                sol = e.result.summary if e.result else ""
-                candidate_sections.append(f"### {role_name} ({e.provider.upper()}) ÇÖZÜMÜ:\n{sol}")
-
-            judge_input = (
-                f"GÖREV:\n{prompt}\n\n"
-                "Aşağıda bağımsız uzmanların bu göreve sundukları aday çözümler yer almaktadır:\n\n"
-                + "\n\n---\n\n".join(candidate_sections)
-                + "\n\n"
-                "Lütfen konsey hakemi olarak bu çözümleri tarafsızca değerlendir:\n"
-                "1. Uzmanların ortak uzlaştığı noktaları belirt.\n"
-                "2. Çelişen veya farklılaşan önerileri ve riskleri tespit et.\n"
-                "3. İki çözümün güçlü yönlerini birleştirerek tek, "
-                "eksiksiz bir sentez nihai sonuç oluştur."
-            )
-
-            judge_task = ProviderTask(
-                prompt=judge_input,
-                role="Konsey Hakemi ve Sentezci",
-                purpose=(
-                    "Bağımsız uzman çözümlerini eleştirerek ortak konsensüs ve "
-                    "nihai sentezi oluştur."
-                ),
-            )
-
-            judge_execution: ProviderExecution | None = None
-            if judge_adapter is not None:
                 try:
-                    judge_execution = await judge_adapter.execute(judge_task, context, plan.policy)
+                    finalizer_execution = await finalizer.execute(
+                        finalizer_task, context, plan.policy
+                    )
                 except Exception:
-                    judge_execution = None
+                    finalizer_execution = None
 
             if (
-                judge_execution is not None
-                and judge_execution.status == ExecutionStatus.SUCCESS
-                and judge_execution.result
+                finalizer_execution is not None
+                and finalizer_execution.status == ExecutionStatus.SUCCESS
+                and finalizer_execution.result
             ):
-                executions.append(judge_execution)
-                final_summary = judge_execution.result.summary
-                synthesis = CouncilSynthesis(
-                    consensus=[
-                        "Bağımsız uzman çözümleri incelendi ve ortak doğrular sentezlendi.",
-                        f"Hakem incelemesi: {judge_key.capitalize()}",
-                    ],
-                    disagreements=[
-                        (
-                            "Uzmanlar arasındaki alternatif yaklaşım ve yöntem "
-                            "farkları hakem tarafından çözümlendi."
-                        ),
-                    ],
-                    confidence_score=0.90,
-                    confidence_rationale=(
-                        f"Çözümler {len(successful)} bağımsız model tarafından üretildi ve "
-                        f"{judge_key.capitalize()} hakemi tarafından sentezlendi."
-                    ),
-                )
+                executions.append(finalizer_execution)
+                final_summary = finalizer_execution.result.summary
             else:
-                # Hakem modeli yoksa şeffaf karşılaştırma ve dürüst güven skoru
-                final_summary = "\n\n---\n\n".join(candidate_sections)
-                synthesis = CouncilSynthesis(
-                    consensus=["İki bağımsız uzman aday çözümü başarıyla toplandı."],
-                    disagreements=[
-                        "Uzman aday çözümleri doğrudan karşılaştırmanız için yukarıda sunulmuştur.",
-                    ],
-                    confidence_score=0.75,
-                    confidence_rationale=(
-                        "İki bağımsız çözüm üretildi, ek hakem turu çalıştırılmadan ham sunuldu."
-                    ),
-                )
-        elif len(successful) == 1:
+                last_result = successful[-1].result
+                assert last_result is not None
+                final_summary = last_result.summary
+
+            provider_count = len(successful_providers)
+            synthesis = CouncilSynthesis(
+                consensus=[
+                    f"{provider_count} sağlayıcı ortak transkript üzerinde iki tur çalıştı."
+                ],
+                disagreements=[
+                    "Nihai metinde belirtilen açık görüş ayrılıkları kullanıcı "
+                    "değerlendirmesine sunuldu."
+                ],
+                confidence_score=0.90 if provider_count >= 3 else 0.75,
+                confidence_rationale=(
+                    f"{provider_count} farklı sağlayıcı birbirlerinin mesajlarını görerek "
+                    "ortak çözümü geliştirdi."
+                ),
+            )
+        elif len(successful) >= 1:
             res = successful[0].result
             final_summary = res.summary if res else ""
             synthesis = CouncilSynthesis(
                 consensus=["Tek bir model başarıyla sonuç üretebildi."],
-                disagreements=["Diğer model çağrısı başarısız oldu veya zaman aşımına uğradı."],
+                disagreements=["Diğer çalışma ortakları başarısız oldu veya zaman aşımına uğradı."],
                 confidence_score=0.60,
                 confidence_rationale="Yalnızca tek model çıktısı mevcut (kısmi başarı).",
             )
@@ -314,7 +311,7 @@ class ExecutionEngine:
             final_summary=final_summary,
             synthesis=synthesis,
             next_step_recommendation=(
-                "Modeller arasındaki olası farklılıkları karşılaştırarak en uygun çözümü seçin."
+                "Konseyin ortak kararını doğrulayın ve önerilen eylemleri uygulayın."
             ),
             total_duration_ms=total_duration,
         )

@@ -87,14 +87,20 @@ class Commander:
             case ExecutionMode.COUNCIL:
                 subtasks.append(
                     SubTask(
-                        role="birinci_uzman",
-                        purpose="Görevi bağımsız bir yaklaşımla analiz et.",
+                        role="Claude çalışma ortağı",
+                        purpose="Ortak çözümü analiz, eleştiri ve önerilerle geliştir.",
                     )
                 )
                 subtasks.append(
                     SubTask(
-                        role="ikinci_uzman",
-                        purpose="Görevi alternatif bir yaklaşımla bağımsız olarak analiz et.",
+                        role="Codex çalışma ortağı",
+                        purpose="Diğer ortakların görüşlerine yanıt ver ve çözümü ilerlet.",
+                    )
+                )
+                subtasks.append(
+                    SubTask(
+                        role="Antigravity çalışma ortağı",
+                        purpose="Ortak konuşmayı değerlendir ve uzlaşıya katkı sağla.",
                     )
                 )
             case ExecutionMode.VISUAL:
