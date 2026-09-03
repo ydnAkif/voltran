@@ -1,6 +1,9 @@
 # VOLTRAN
 
+[![CI](https://github.com/ydnAkif/voltran/actions/workflows/ci.yml/badge.svg)](https://github.com/ydnAkif/voltran/actions/workflows/ci.yml)
+
 **Birden fazla yapay zekâ modelini, tek bir görevin uzman parçaları olarak birleştiren yerel orkestrasyon sistemi.**
+
 
 VOLTRAN; kullanıcıdan tek bir görev alır, görevi uygun uzmanlara böler, sonuçları kontrollü turlarla karşılaştırır ve tek bir denetlenebilir cevap üretir. Amaç, üç modele aynı soruyu sorup üç ayrı cevap göstermek değil; her modeli gerçekten katkı sağlayacağı yerde kullanmaktır.
 
@@ -95,31 +98,56 @@ MVP’de masaüstü arayüzü, bulut sunucusu, otomatik API harcaması ve sını
 
 Kesin paket sürümleri, ilk kurulum sırasında Mac’teki mevcut Python ve paket yöneticisi kontrol edildikten sonra kilitlenecektir.
 
-## Planlanan komutlar
+## Kullanım ve Komutlar
 
+### 🩺 Sistem Teşhisi (`voltran doctor`)
+Ortamı, gerekli araçları (`codex`, `claude`, `agy`) ve oturum durumunu hiçbir değişiklik yapmadan denetler:
 ```bash
-voltran doctor
+uv run voltran doctor
+# Makinece okunabilir JSON çıktısı için:
+uv run voltran doctor --json
+```
+
+### ⚡ Görev Yürütme (`voltran run`)
+Komutan görevi analiz ederek uygun çalışma modunu (`quick`, `expert`, `council`) ve modelleri otomatik seçer:
+```bash
+# Otomatik mod seçimi ile çalıştırma:
+uv run voltran run "Sistem mimarisini karşılaştır ve riskleri listele"
+
+# Kota harcamadan plan ve sağlayıcı dağılımını önizleme:
+uv run voltran run "Veritabanı şemasını optimize et" --dry-run --explain
+
+# Belirli bir modda ve bağlam dosyasıyla çalıştırma:
+uv run voltran run --mode council --file app.py "Bu kodun güvenlik açıklarını incele"
+
+# Sonuç raporunu Markdown dosyasına veya JSON formatına kaydetme:
+uv run voltran run "JSON çıktısını özetle" --mode quick --output rapor.md
+uv run voltran run "Hızlı analiz" --json
+```
+
+### 📜 Çalışma Geçmişi (`voltran history`)
+Yerel SQLite veritabanındaki son çalışmaları listeler:
+```bash
+uv run voltran history
+```
+
+### 🔜 Geliştirilmekte Olan Komutlar
+```bash
 voltran login codex
 voltran login claude
 voltran login google
-voltran run --mode expert "Görev açıklaması"
-voltran run --mode council --file belge.pdf "Belgeyi incele"
-voltran history
 voltran config
 ```
 
-`voltran doctor`; işletim sistemi, mimari, gerekli CLI araçları, sürümler, oturumlar ve eksik bağımlılıklar için salt okunur kontrol yapacaktır. Kurulum veya değişiklik yapmadan önce uygulanacak işlemleri kullanıcıya gösterecektir.
-
-## Geliştirme kurulumu
+## Geliştirme ve Test
 
 ```bash
 uv sync --extra dev
-uv run voltran doctor
-uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest -v
 ```
 
-Makinece okunabilir teşhis çıktısı için `uv run voltran doctor --json`, oturum
-kontrollerini atlamak için `uv run voltran doctor --no-sessions` kullanılabilir.
 
 ## Güvenlik sınırı
 
