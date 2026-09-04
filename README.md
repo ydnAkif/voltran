@@ -165,10 +165,21 @@ uv run voltran run --mode expert --file app.py "Bu kodun güvenlik açıkların�
 uv run voltran run "JSON çıktısını özetle" --mode quick --output rapor.md
 uv run voltran run "Hızlı analiz" --json
 
+# Yalnızca belirli sağlayıcılara izin verme (SEC-02):
+uv run voltran run "Bu şemayı incele" --provider claude
+uv run voltran run "Mimariyi karşılaştır" -m council --provider codex,google
+
+# Hangi verinin hangi sağlayıcıya gideceğini kota harcamadan görme:
+uv run voltran run "Bu dosyayı incele" -f app.py --dry-run --explain
+
 # Çöken bir yazma çalışmasından kalan kilidi kaldırma:
 uv run voltran unlock app.py
 uv run voltran unlock --all
 ```
+
+> **Not:** Görevde finans, sağlık, kimlik, iletişim veya kimlik bilgisi tespit edilirse
+> VOLTRAN uyarı verir ve görevi kendiliğinden `council` moduna genişletmez. Üç sağlayıcıya
+> birden göndermek isterseniz `-m council` ile açıkça belirtmeniz gerekir.
 
 ### 💡 Kolay Erişim (Global Kurulum)
 `uv run` yazmadan doğrudan `voltran` komutunu kullanmak isterseniz:
@@ -236,15 +247,27 @@ uv run pytest -v
 
 ## Güvenlik sınırı
 
-VOLTRAN, bir dosyayı birden fazla sağlayıcıya gönderdiğinde veri fiilen birden fazla hizmetle paylaşılmış olur. Bu nedenle finansal, sağlıkla ilgili veya kimlik bilgisi içeren dosyalarda varsayılan politika şudur:
+VOLTRAN, bir dosyayı birden fazla sağlayıcıya gönderdiğinde veri fiilen birden fazla hizmetle paylaşılmış olur. Finansal, sağlıkla ilgili veya kimlik bilgisi içeren girdilerde bugün geçerli olan davranış şudur:
 
-1. Hassas veri sınıflandırması yap.
-2. Gereksiz kimlik alanlarını maskele.
-3. Yalnızca gerekli parçaları seç.
-4. Kullanılacak sağlayıcıları işlem öncesinde göster.
-5. Kullanıcı onayı yoksa kapsamı genişletme.
+| Politika | Durum |
+| --- | --- |
+| Hassas veri sınıflandırması (finans, sağlık, kimlik, iletişim, kimlik bilgisi) | ✅ `voltran run` her çalışmada sınıflandırır ve uyarır |
+| Hassas görevin sessizce `council` moduna genişletilmemesi | ✅ Otomatik genişletme yapılmaz; `-m council` ile açıkça istenebilir |
+| Sağlayıcıya gitmeden önce sır maskeleme | ✅ API anahtarı, erişim belirteci, parola ataması ve e-posta maskelenir |
+| Kullanılacak sağlayıcıların işlem öncesinde gösterilmesi | ✅ `--dry-run` veri paylaşım önizlemesi ve `--explain` |
+| Sağlayıcı izin listesi | ✅ `--provider` ile görev bazlı kısıtlama |
+| Yalnızca gerekli dosya parçasının gönderilmesi (veri minimizasyonu) | ⏳ Planlandı — [ROADMAP.md](ROADMAP.md) SEC-04 |
 
-Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çalışma kayıtlarına yazılmaz; yerel SQLite veritabanına kaydedilmeden önce otomatik olarak maskelenir (`[REDACTED_API_KEY]`, `[REDACTED_TOKEN]`, `[REDACTED_EMAIL]`, `[REDACTED_CARD]`).
+Hassas veri tespit edildiğinde uyarı, bulgunun **türünü ve sayısını** gösterir; eşleşen değerin kendisi ne ekrana ne de çalışma geçmişine yazılır:
+
+```
+⚠ Hassas veri uyarısı: kimlik, finans, iletişim
+  Bulgular: T.C. kimlik numarası deseni ×1, IBAN deseni ×1, e-posta adresi ×1
+  Bu görev şu sağlayıcılara gidecek: claude
+  Konsey moduna otomatik genişletme yapılmadı.
+```
+
+Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çalışma kayıtlarına yazılmaz; hem sağlayıcıya gönderilmeden hem de yerel SQLite veritabanına kaydedilmeden önce otomatik olarak maskelenir (`[REDACTED_API_KEY]`, `[REDACTED_TOKEN]`, `[REDACTED_CREDENTIAL]`, `[REDACTED_EMAIL]`, `[REDACTED_CARD]`). Kaynak kodun bozulmaması için giden yolda yalnızca yanlış pozitif riski düşük desenler kullanılır.
 
 ## Yol haritası
 

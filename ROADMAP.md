@@ -19,43 +19,44 @@ hata davranışı ve kullanıcı dokümantasyonu birlikte hazırsa tamamlanmış
 | --- | --- | --- | --- |
 | CLI ve paketleme | Tamamlandı | \`doctor\`, \`run\`, \`history\`, \`bench\`, \`dashboard\`, uv paketi ve macOS betiği | Tekrarlanabilir release süreci |
 | Sağlayıcı adaptörleri | Kısmi | Codex, Claude ve Antigravity; timeout ve süreç temizliği | Sürüm uyumluluk matrisi ve gerçek CLI smoke testleri |
-| Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç ve hata raporu | CLI sağlayıcı seçimi ve kullanıcı iptali |
-| Council | Kısmi | hcom oturumu, farklı sağlayıcılar, supervisor ve açık uzlaşma işareti | Tur/bağlam bütçesi, güçlü uzlaşma doğrulaması ve devam |
-| Router | Kısmi | Yetenek, erişilebilirlik ve moda göre basit puanlama | Veri politikası, kota, maliyet, gecikme ve oturum sağlığı |
-| Gizlilik | Kısmi | Sağlayıcıya gönderim ve SQLite öncesi secret/PII maskeleme | Hassasiyet sınıflandırması, veri minimizasyonu ve sağlayıcı izin listesi |
+| Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç, hata raporu ve `--provider` izin listesi | Kullanıcı iptali (`voltran cancel`) ve paralel alt görev yürütme |
+| Council | Kısmi | hcom oturumu, farklı sağlayıcılar, supervisor, açık uzlaşma işareti, izin listesine uyum ve "en az iki sağlayıcı" şartı | Tur/bağlam bütçesi, güçlü uzlaşma doğrulaması ve devam |
+| Router | Kısmi | Yetenek, erişilebilirlik, moda göre puanlama ve doğrulanan sağlayıcı izin listesi | Kota, maliyet, gecikme ve oturum sağlığı |
+| Gizlilik | Kısmi | Sağlayıcıya gönderim ve SQLite öncesi secret/PII maskeleme, hassasiyet sınıflandırması, hassas görevde otomatik council genişlemesinin engellenmesi, sağlayıcı izin listesi ve dry-run veri paylaşım önizlemesi | Veri minimizasyonu (SEC-04) |
 | Yazma güvenliği | Kısmi | Atomik süreçler arası dosya kilidi; council'da tek yazıcı | Git worktree izolasyonu ve kontrollü diff uygulama |
 | Raporlama | Kısmi | Markdown/JSON, rol, sağlayıcı, durum ve council güven alanları | Kanıtlar ve isteğe bağlı ham uzman çıktıları |
 | Geçmiş | Kısmi | Maskelenmiş SQLite özeti ve son çalışmalar | Replay/resume |
 | Benchmark | Kısmi | Üç sabit senaryo; durum, süre ve uzlaşma kaydı | Altın cevaplar, kalite değerlendirmesi ve karşılaştırmalı ölçüm |
-| Test ve CI | Kısmi | Python 3.11–3.14, macOS/Linux, 67 test, %83 kapsam | Riskli modüllerde hedefli testler ve %90 kapsam |
+| Test ve CI | Kısmi | Python 3.11–3.14, macOS/Linux, 99 test, %85 kapsam, CI kapsam kapısı %83 | `hcom_client` ve `providers/cli` için hedefli testler; %90 kapsam |
 | Dashboard | Kısmi | Ajan, olay, kilit ve geçmiş görünümü | Hata dayanıklılığı ve uzun süreli kullanım testi |
 
 ## Sıradaki paket: güvenilir 0.1.x
 
 Bu paket bitmeden yeni büyük özellik veya masaüstü arayüzü öncelik değildir.
 
-### P0 — Sağlayıcı izin politikası (SEC-02, UR-03)
+### P0 — Sağlayıcı izin politikası (SEC-02, UR-03) — **Tamamlandı**
 
-- \`voltran run --provider\` ile tek veya çoklu izin listesi ekle.
-- Politikayı TaskPlan ve Router boyunca taşı.
-- Council için iki farklı izinli ve erişilebilir sağlayıcı yoksa açık degraded/failure üret.
-- Dry-run çıktısında hangi verinin hangi sağlayıcıya gideceğini göster.
+- [x] \`voltran run --provider\` tek, çoklu ve virgülle ayrılmış izin listesi kabul eder.
+- [x] Politika Router üzerinden taşınır; bilinmeyen anahtar sessizce yok sayılmaz, hata verir.
+- [x] Council için iki farklı erişilebilir sağlayıcı yoksa açık hata üretilir.
+- [x] Dry-run çıktısı hangi verinin hangi sağlayıcıya gideceğini ve çağrı sayısını gösterir.
 
-Kabul ölçütü:
+Kabul ölçütü: karşılandı. İzin verilmeyen sağlayıcı plana hiç girmediği için hcom
+rollerinde de görünemez; tek, çoklu, geçersiz, erişilemeyen ve kuru çalışma senaryoları
+`tests/test_router.py` ve `tests/test_cli.py` içinde testlidir.
 
-- İzin verilmeyen sağlayıcı hiçbir yürütme veya hcom komutunda görünmez.
-- Tek, çoklu, geçersiz ve erişilemeyen sağlayıcı senaryoları testlidir.
+### P0 — Hassas veri sınıflandırması (SEC-03) — **Tamamlandı**
 
-### P0 — Hassas veri sınıflandırması (SEC-03)
+- [x] \`classifier.py\` finans, sağlık, kimlik, iletişim ve kimlik bilgisi sınıflarını üretir;
+      yapısal desenler (TCKN, IBAN, kart, e-posta, telefon, anahtar/parola ataması) ile
+      Türkçe ekleri ve büyük \`I/İ\` harflerini karşılayan alan sözcüklerini birlikte kullanır.
+- [x] Hassas görev otomatik olarak council moduna genişletilmez; gerekçe plana yazılır.
+- [x] Paylaşılacak sağlayıcılar ve veri, çalıştırmadan önce uyarıda ve dry-run tablosunda gösterilir.
+- [x] Bulgu raporu yalnızca desenin adını ve sayısını taşır; eşleşen değer ekrana veya
+      geçmişe hiç yazılmaz.
 
-- Finans, sağlık, kimlik, iletişim ve hesap verisi için yerel sınıflandırma üret.
-- Hassas görev otomatik olarak council moduna genişletilmesin.
-- Kullanıcı açıkça council isterse paylaşılacak sağlayıcı ve kapsam önceden gösterilsin.
-
-Kabul ölçütü:
-
-- Hassas örnekler için false-negative odaklı test seti bulunur.
-- Hassas görevde sessiz çoklu-sağlayıcı genişlemesi yapılamaz.
+Kabul ölçütü: karşılandı. \`tests/test_classifier.py\` false-negative odaklı senaryoları,
+\`tests/test_commander.py\` ise sessiz genişlemenin engellendiğini doğrular.
 
 ### P0 — Veri minimizasyonu (SEC-04)
 

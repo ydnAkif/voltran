@@ -148,3 +148,58 @@ def test_unlock_reports_when_no_lock_exists(monkeypatch: MonkeyPatch, tmp_path: 
     assert result.exit_code == 0
     assert "Kilit bulunmuyor" in result.stdout
     assert "Kilit kaldırıldı" not in result.stdout
+
+
+def test_run_rejects_unknown_provider(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["run", "test görevi", "--provider", "gpt5", "--dry-run"])
+
+    assert result.exit_code == 2
+    assert "Bilinmeyen sağlayıcı" in result.stdout
+    assert "claude" in result.stdout
+
+
+def test_run_warns_on_sensitive_input_and_skips_council(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    context = tmp_path / "bordro.txt"
+    context.write_text("TC: 12345678901\nMaaş: 45000", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["run", "Bu bordroyu karşılaştır", "--file", str(context), "--dry-run", "--explain"],
+    )
+
+    assert result.exit_code == 0
+    assert "Hassas veri uyarısı" in result.stdout
+    assert "Konsey moduna otomatik genişletme yapılmadı" in result.stdout
+    assert "EXPERT" in result.stdout
+    # Uyarı bulgunun türünü söyler, değerini değil.
+    assert "12345678901" not in result.stdout
+
+
+def test_dry_run_shows_data_sharing_preview(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    context = tmp_path / "notlar.txt"
+    context.write_text("merhaba dünya", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "Bu dosyayı incele",
+            "--file",
+            str(context),
+            "--provider",
+            "codex",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Veri Paylaşım Önizlemesi" in result.stdout
+    assert "notlar.txt" in result.stdout
+    assert "Tahmini model çağrısı: 1" in result.stdout
+    assert "codex" in result.stdout

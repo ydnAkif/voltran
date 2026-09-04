@@ -71,3 +71,41 @@ def test_commander_creates_plan_with_subtasks(tmp_path: Path) -> None:
         for subtask in plan.subtasks
         for provider_name in ("Claude", "Codex", "Antigravity")
     )
+
+
+def test_sensitive_task_is_not_auto_expanded_to_council() -> None:
+    # Görev konsey anahtar kelimesi içeriyor ("karşılaştır") ama hassas veri var.
+    plan = Commander().create_plan(
+        "Maaş bordromdaki yatırım kesintilerini karşılaştır ve riskleri listele"
+    )
+
+    assert plan.mode is ExecutionMode.EXPERT
+    assert "finans" in plan.sensitivity_categories
+    assert "konseye genişletilmedi" in plan.reasoning
+
+
+def test_explicit_council_still_honoured_for_sensitive_task() -> None:
+    plan = Commander().create_plan(
+        "Maaş bordromu karşılaştır",
+        mode=ExecutionMode.COUNCIL,
+    )
+
+    assert plan.mode is ExecutionMode.COUNCIL
+    assert "finans" in plan.sensitivity_categories
+
+
+def test_non_sensitive_task_still_reaches_council() -> None:
+    plan = Commander().create_plan("Mikroservis mimarisini monolit ile karşılaştır")
+
+    assert plan.mode is ExecutionMode.COUNCIL
+    assert plan.sensitivity_categories == []
+
+
+def test_context_text_participates_in_sensitivity_decision() -> None:
+    plan = Commander().create_plan(
+        "Bu dosyayı karşılaştır",
+        context_text="TC: 12345678901",
+    )
+
+    assert plan.mode is ExecutionMode.EXPERT
+    assert "kimlik" in plan.sensitivity_categories

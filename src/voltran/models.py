@@ -143,6 +143,9 @@ class TaskPlan(BaseModel):
     subtasks: list[SubTask] = Field(default_factory=lambda: list[SubTask]())
     context_file: Path | None = None
     policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)
+    # SEC-03: görevde tespit edilen hassas veri sınıfları. Yalnızca sınıf adları
+    # tutulur, eşleşen değerler asla plana veya rapora yazılmaz.
+    sensitivity_categories: list[str] = Field(default_factory=lambda: list[str]())
 
 
 class CouncilSynthesis(BaseModel):

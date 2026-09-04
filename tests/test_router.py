@@ -117,3 +117,98 @@ def test_router_ignores_extra_adapters_beyond_council_role_count() -> None:
 
     assert len(assigned.subtasks) == 3
     assert len({subtask.assigned_provider for subtask in assigned.subtasks}) == 3
+
+
+def _plan(mode: ExecutionMode, subtask_count: int) -> TaskPlan:
+    return TaskPlan(
+        mode=mode,
+        reasoning="test",
+        subtasks=[SubTask(role=f"rol-{index}", purpose="") for index in range(subtask_count)],
+    )
+
+
+def _registry(*adapters: _MockAdapter) -> dict[str, ProviderAdapter]:
+    return {adapter.key: adapter for adapter in adapters}
+
+
+def test_validate_provider_keys_rejects_unknown_and_deduplicates() -> None:
+    router = Router(_registry(_MockAdapter("claude"), _MockAdapter("codex")))
+
+    assert router.known_providers() == ("claude", "codex")
+    assert router.validate_provider_keys(["codex", "claude", "codex"]) == ["codex", "claude"]
+
+    try:
+        router.validate_provider_keys(["gpt5"])
+    except ValueError as exc:
+        assert "gpt5" in str(exc)
+        assert "claude, codex" in str(exc)
+    else:  # pragma: no cover - beklenen hata atılmadı
+        raise AssertionError("Bilinmeyen sağlayıcı için ValueError bekleniyordu.")
+
+
+def test_allow_list_restricts_assignment() -> None:
+    router = Router(
+        _registry(_MockAdapter("claude"), _MockAdapter("codex"), _MockAdapter("google"))
+    )
+    plan = router.assign_providers(
+        _plan(ExecutionMode.COUNCIL, 3), allowed_providers=["codex", "google"]
+    )
+
+    assert {subtask.assigned_provider for subtask in plan.subtasks} == {"codex", "google"}
+    assert len(plan.subtasks) == 2
+
+
+def test_dry_run_honours_allow_list_when_nothing_is_installed() -> None:
+    # Hiçbir CLI kurulu değil: kuru çalışma yine de izin listesine uymalı, aksi
+    # hâlde önizleme gerçek çalışmadan farklı sağlayıcılar gösterir.
+    router = Router(
+        _registry(
+            _MockAdapter("claude", available=False),
+            _MockAdapter("codex", available=False),
+            _MockAdapter("google", available=False),
+        )
+    )
+    plan = router.assign_providers(
+        _plan(ExecutionMode.EXPERT, 1), allowed_providers=["google"], dry_run=True
+    )
+
+    assert plan.subtasks[0].assigned_provider == "google"
+
+
+def test_empty_allow_list_means_no_restriction() -> None:
+    router = Router(_registry(_MockAdapter("claude")))
+    plan = router.assign_providers(_plan(ExecutionMode.EXPERT, 1), allowed_providers=[])
+
+    assert plan.subtasks[0].assigned_provider == "claude"
+
+
+def test_allow_list_with_no_available_provider_reports_the_allow_list() -> None:
+    router = Router(_registry(_MockAdapter("claude"), _MockAdapter("codex", available=False)))
+
+    try:
+        router.assign_providers(_plan(ExecutionMode.EXPERT, 1), allowed_providers=["codex"])
+    except RuntimeError as exc:
+        assert "codex" in str(exc)
+        assert "İzin listesini genişletin" in str(exc)
+    else:  # pragma: no cover - beklenen hata atılmadı
+        raise AssertionError("Kullanılamayan izin listesi için RuntimeError bekleniyordu.")
+
+
+def test_council_requires_at_least_two_providers() -> None:
+    router = Router(_registry(_MockAdapter("claude"), _MockAdapter("codex", available=False)))
+
+    try:
+        router.assign_providers(_plan(ExecutionMode.COUNCIL, 3))
+    except RuntimeError as exc:
+        assert "en az iki farklı sağlayıcı" in str(exc)
+        assert "claude" in str(exc)
+    else:  # pragma: no cover - beklenen hata atılmadı
+        raise AssertionError("Tek sağlayıcılı konsey için RuntimeError bekleniyordu.")
+
+
+def test_council_single_provider_is_allowed_in_dry_run() -> None:
+    router = Router(_registry(_MockAdapter("claude")))
+    plan = router.assign_providers(_plan(ExecutionMode.COUNCIL, 3), dry_run=True)
+
+    assert len(plan.subtasks) == 1
+    assert plan.subtasks[0].assigned_provider == "claude"

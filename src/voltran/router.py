@@ -57,6 +57,31 @@ class Router:
     def __init__(self, registry: dict[str, ProviderAdapter] | None = None) -> None:
         self.registry = registry if registry is not None else default_registry()
 
+    def known_providers(self) -> tuple[str, ...]:
+        """Kayıtlı sağlayıcı anahtarlarını sıralı olarak döndürür."""
+
+        return tuple(sorted(self.registry))
+
+    def validate_provider_keys(self, keys: Sequence[str]) -> list[str]:
+        """Kullanıcının verdiği sağlayıcı izin listesini doğrular (SEC-02, UR-03).
+
+        Tanınmayan bir anahtar sessizce yok sayılmaz; aksi hâlde kullanıcı veriyi
+        kısıtladığını sanırken plan tüm sağlayıcılara açık kalır.
+        """
+
+        unknown = [key for key in keys if key not in self.registry]
+        if unknown:
+            raise ValueError(
+                f"Bilinmeyen sağlayıcı: {', '.join(sorted(unknown))}. "
+                f"Geçerli değerler: {', '.join(self.known_providers())}."
+            )
+        # Sırayı koru, tekrarları at.
+        resolved: list[str] = []
+        for key in keys:
+            if key not in resolved:
+                resolved.append(key)
+        return resolved
+
     def available_adapters(
         self,
         *,
@@ -93,20 +118,34 @@ class Router:
 
         has_file = plan.context_file is not None
         req_caps = ProviderCapabilities(file_access=True) if has_file else None
+        # Boş izin listesi "kısıt yok" demektir; aksi hâlde hiçbir sağlayıcı kalmaz.
+        allowed = list(allowed_providers) if allowed_providers else None
 
         available = self.available_adapters(
-            allowed_keys=allowed_providers,
+            allowed_keys=allowed,
             required_caps=req_caps,
         )
 
         if not available:
             # Yetenek filtresi olmadan sadece erişilebilir olanları dene
-            available = self.available_adapters(allowed_keys=allowed_providers)
+            available = self.available_adapters(allowed_keys=allowed)
 
         if not available:
             if dry_run:
-                # Kuru çalışmada araçlar henüz kurulu olmasa bile plan simülasyonu gösterilebilir
-                available = list(self.registry.values())
+                # Kuru çalışmada araçlar henüz kurulu olmasa bile plan simülasyonu
+                # gösterilebilir. İzin listesi verilmişse ona yine de uyulur; aksi
+                # hâlde önizleme, gerçek çalışmadan farklı sağlayıcılar gösterir.
+                available = [
+                    adapter
+                    for key, adapter in self.registry.items()
+                    if allowed is None or key in allowed
+                ]
+            elif allowed:
+                raise RuntimeError(
+                    "İzin verilen sağlayıcıların hiçbiri kullanılabilir değil: "
+                    f"{', '.join(allowed)}. İzin listesini genişletin veya "
+                    "'voltran doctor' ile bu araçların kurulu olduğunu doğrulayın."
+                )
             else:
                 raise RuntimeError(
                     "Kullanılabilir veya erişilebilir hiçbir sağlayıcı CLI bulunamadı. "
@@ -122,6 +161,15 @@ class Router:
         )
 
         if plan.mode == ExecutionMode.COUNCIL:
+            # Konsey en az iki farklı sağlayıcı ister; tek ajanlı bir oturum konsey
+            # değildir ve sessizce öyleymiş gibi raporlanmamalıdır.
+            if len(ranked) < 2 and not dry_run:
+                raise RuntimeError(
+                    "Konsey modu en az iki farklı sağlayıcı gerektirir; "
+                    f"şu an yalnızca {len(ranked)} tanesi kullanılabilir "
+                    f"({', '.join(adapter.key for adapter in ranked) or 'hiçbiri'}). "
+                    "İzin listesini genişletin veya '-m expert' ile çalıştırın."
+                )
             # Her sağlayıcı council içinde en fazla bir ajan çalıştırır. Eksik
             # sağlayıcılar marka çeşitliliği varmış gibi çoğaltılmaz.
             plan.subtasks = plan.subtasks[: len(ranked)]

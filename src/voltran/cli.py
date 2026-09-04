@@ -14,7 +14,7 @@ from rich.table import Table
 
 from voltran import __version__
 from voltran.doctor import build_doctor_report
-from voltran.models import CheckStatus, DoctorReport, ExecutionMode
+from voltran.models import CheckStatus, DoctorReport, ExecutionMode, TaskPlan
 
 app = typer.Typer(
     name="voltran",
@@ -61,6 +61,59 @@ def _render_doctor_report(report: DoctorReport) -> None:
     labels = {"ready": "hazır", "degraded": "kısmen hazır", "failed": "hazır değil"}
     console.print(f"\nGenel durum: [bold]{labels[report.overall_status]}[/bold]")
     console.print("[dim]Bu komut sistemde hiçbir değişiklik yapmadı.[/dim]")
+
+
+def _split_provider_options(values: list[str] | None) -> list[str]:
+    """`--provider a,b --provider c` biçimini tek bir anahtar listesine düzler."""
+
+    if not values:
+        return []
+    keys: list[str] = []
+    for value in values:
+        keys.extend(part.strip() for part in value.split(",") if part.strip())
+    return keys
+
+
+def _read_context_text(file: Path | None) -> str | None:
+    """Bağlam dosyasını hassasiyet sınıflandırması için okur; okunamazsa sessiz geçer."""
+
+    if file is None or not file.is_file():
+        return None
+    try:
+        return file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _render_data_sharing_preview(
+    plan: TaskPlan,
+    file: Path | None,
+    context_text: str | None,
+) -> None:
+    """FR-14: kuru çalışmada hangi verinin hangi sağlayıcıya gideceğini gösterir."""
+
+    table = Table(title="Kuru Çalışma — Veri Paylaşım Önizlemesi", show_lines=False)
+    table.add_column("Sağlayıcı", no_wrap=True)
+    table.add_column("Rol")
+    table.add_column("Paylaşılacak veri")
+
+    shared = "Görev metni"
+    if context_text is not None and file is not None:
+        shared = f"Görev metni + `{file.name}` ({len(context_text)} karakter)"
+    elif file is not None:
+        shared = "Görev metni (bağlam dosyası okunamadı)"
+
+    for subtask in plan.subtasks:
+        table.add_row(subtask.assigned_provider or "-", subtask.role, shared)
+
+    console.print(table)
+    console.print(f"[dim]Tahmini model çağrısı: {len(plan.subtasks)}[/dim]")
+    if plan.sensitivity_categories:
+        console.print(f"[dim]Hassas veri sınıfları: {', '.join(plan.sensitivity_categories)}[/dim]")
+    console.print(
+        "[dim]Gönderim öncesi API anahtarları, erişim belirteçleri, parola atamaları "
+        "ve e-posta adresleri maskelenir.[/dim]\n"
+    )
 
 
 @app.command()
@@ -145,9 +198,21 @@ def run(
             ),
         ),
     ] = False,
+    providers: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--provider",
+            "-p",
+            help=(
+                "Yalnızca bu sağlayıcılara izin ver (tekrarlanabilir veya virgülle "
+                "ayrılmış). Örnek: --provider claude --provider codex"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Görevi uygun çalışma modu ve modellerle tek raporda yürüt."""
 
+    from voltran.classifier import classify_sensitivity
     from voltran.commander import Commander
     from voltran.engine import ExecutionEngine
     from voltran.lock import FileLockManager
@@ -155,22 +220,50 @@ def run(
     from voltran.router import Router
     from voltran.store import RunStore
 
+    router = Router()
+    try:
+        allowed = router.validate_provider_keys(_split_provider_options(providers))
+    except ValueError as exc:
+        console.print(f"[red]Sağlayıcı seçimi hatası:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    context_text = _read_context_text(file)
+    sensitivity = classify_sensitivity(prompt, context_text)
+
     commander = Commander()
-    plan = commander.create_plan(prompt, mode=mode, context_file=file)
+    plan = commander.create_plan(
+        prompt,
+        mode=mode,
+        context_file=file,
+        context_text=context_text,
+    )
     plan.policy.timeout_seconds = timeout
     plan.policy.blind_mode = blind
     plan.policy.allow_writes = allow_writes
 
-    router = Router()
     try:
-        router.assign_providers(plan, dry_run=dry_run)
+        router.assign_providers(plan, allowed_providers=allowed, dry_run=dry_run)
     except RuntimeError as exc:
         console.print(f"[red]Yönlendirme hatası:[/red] {exc}")
         raise typer.Exit(code=1) from exc
 
+    if sensitivity.is_sensitive and not json_output:
+        # SEC-03: hassas veri her koşulda görünür biçimde bildirilir.
+        console.print(
+            f"[bold yellow]⚠ Hassas veri uyarısı:[/bold yellow] {', '.join(sensitivity.categories)}"
+        )
+        console.print(f"  [dim]Bulgular: {sensitivity.summary()}[/dim]")
+        targets = sorted({st.assigned_provider or "-" for st in plan.subtasks})
+        console.print(f"  [dim]Bu görev şu sağlayıcılara gidecek: {', '.join(targets)}[/dim]")
+        if mode is None and plan.mode is not ExecutionMode.COUNCIL:
+            console.print("  [dim]Konsey moduna otomatik genişletme yapılmadı.[/dim]")
+        console.print()
+
     if explain and not json_output:
         console.print(f"[bold cyan]Planlanan Mod:[/bold cyan] {plan.mode.value.upper()}")
         console.print(f"[bold cyan]Seçim Gerekçesi:[/bold cyan] {plan.reasoning}")
+        if allowed:
+            console.print(f"[bold cyan]Sağlayıcı İzin Listesi:[/bold cyan] {', '.join(allowed)}")
         if plan.policy.blind_mode:
             console.print("  [magenta]• Kör Hakemlik (Blind Peer Review) devrede.[/magenta]")
         if plan.policy.allow_writes:
@@ -179,6 +272,9 @@ def run(
             provider_tag = f"[green]{st.assigned_provider}[/green]"
             console.print(f"  • [yellow]{st.role}[/yellow] ➔ {provider_tag}: {st.purpose}")
         console.print()
+
+    if dry_run and not json_output:
+        _render_data_sharing_preview(plan, file, context_text)
 
     lock_mgr = FileLockManager()
     lock_holder = f"voltran-orchestrator-{uuid4().hex}"

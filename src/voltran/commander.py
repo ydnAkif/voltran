@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-import unicodedata
 from pathlib import Path
 
+from voltran.classifier import SensitivityReport, classify_sensitivity, normalize_turkish
 from voltran.models import ExecutionMode, ExecutionPolicy, SubTask, TaskPlan
 
 _COUNCIL_KEYWORDS = (
@@ -19,24 +19,23 @@ _QUICK_KEYWORDS = (
 _VISUAL_KEYWORDS = r"\b(görsel|resim|çizim|diyagram|mockup|şema|logo|infografik|diagram)\w*"
 
 
-def _normalize_for_matching(prompt: str) -> str:
-    """Türkçe I/İ harflerini casefold öncesinde doğru küçük harfe dönüştür."""
-
-    turkish_lower = prompt.replace("I", "ı").replace("İ", "i")
-    return unicodedata.normalize("NFC", turkish_lower.casefold().replace("i\u0307", "i"))
-
-
 def detect_mode(
     prompt: str,
     *,
     explicit_mode: ExecutionMode | None = None,
+    sensitivity: SensitivityReport | None = None,
 ) -> tuple[ExecutionMode, str]:
-    """Görevin içeriğini inceleyerek uygun modu ve kısa gerekçesini tespit eder."""
+    """Görevin içeriğini inceleyerek uygun modu ve kısa gerekçesini tespit eder.
+
+    SEC-03 gereği hassas veri tespit edilen bir görev, kullanıcı açıkça istemedikçe
+    `council` moduna genişletilmez; aksi hâlde aynı veri üç ayrı sağlayıcıya birden
+    gönderilmiş olur.
+    """
 
     if explicit_mode is not None:
         return explicit_mode, "Kullanıcı tarafından açıkça belirtildi."
 
-    lower = _normalize_for_matching(prompt)
+    lower = normalize_turkish(prompt)
 
     if re.search(_VISUAL_KEYWORDS, lower):
         return (
@@ -45,6 +44,16 @@ def detect_mode(
         )
 
     if re.search(_COUNCIL_KEYWORDS, lower):
+        if sensitivity is not None and sensitivity.is_sensitive:
+            return (
+                ExecutionMode.EXPERT,
+                (
+                    "Görev konsey ölçütlerini karşılıyor, ancak hassas veri "
+                    f"({', '.join(sensitivity.categories)}) tespit edildiği için "
+                    "otomatik olarak konseye genişletilmedi. Gerekiyorsa '-m council' "
+                    "ile açıkça isteyin."
+                ),
+            )
         return (
             ExecutionMode.COUNCIL,
             "Yüksek doğruluk, mimari karar, risk veya karşılaştırmalı analiz gerektiriyor.",
@@ -72,8 +81,12 @@ class Commander:
         mode: ExecutionMode | None = None,
         context_file: Path | None = None,
         policy: ExecutionPolicy | None = None,
+        context_text: str | None = None,
     ) -> TaskPlan:
-        chosen_mode, reasoning = detect_mode(prompt, explicit_mode=mode)
+        # SEC-03: hassasiyet, mod seçiminden önce belirlenir; bağlam dosyasının
+        # içeriği de görev metniyle birlikte değerlendirilir.
+        sensitivity = classify_sensitivity(prompt, context_text)
+        chosen_mode, reasoning = detect_mode(prompt, explicit_mode=mode, sensitivity=sensitivity)
         active_policy = policy or ExecutionPolicy()
 
         subtasks: list[SubTask] = []
@@ -125,4 +138,5 @@ class Commander:
             subtasks=subtasks,
             context_file=context_file,
             policy=active_policy,
+            sensitivity_categories=list(sensitivity.categories),
         )
