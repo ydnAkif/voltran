@@ -40,8 +40,16 @@ class SupervisorPolicy:
     poll_interval_seconds: float = 1.0
     idle_grace_seconds: float = 3.0
     minimum_participants: int = 2
+    max_rounds: int = 2
+    max_context_chars: int = 120_000
     done_marker: str = "VOLTRAN_DONE"
     consensus_marker: str = "VOLTRAN_CONSENSUS"
+
+    def __post_init__(self) -> None:
+        if self.max_rounds < 1:
+            raise ValueError("max_rounds en az 1 olmalıdır.")
+        if self.max_context_chars < 1:
+            raise ValueError("max_context_chars en az 1 olmalıdır.")
 
 
 @dataclass(slots=True)
@@ -54,6 +62,9 @@ class SupervisionOutcome:
     participants: set[str] = field(default_factory=lambda: set[str]())
     completed_agents: set[str] = field(default_factory=lambda: set[str]())
     consensus_reached: bool = False
+    rounds_completed: int = 0
+    context_chars: int = 0
+    context_truncated: bool = False
 
 
 PollEvents = Callable[[], Awaitable[Sequence[EventLike]]]
@@ -88,6 +99,9 @@ class CollaborationSupervisor:
         events_by_id: dict[str, EventLike] = {}
         participants: set[str] = set()
         completed_agents: set[str] = set()
+        message_counts = {name: 0 for name in expected}
+        consensus_seen = False
+        context_chars = 0
 
         while True:
             now = time.monotonic()
@@ -98,12 +112,31 @@ class CollaborationSupervisor:
                     events_by_id,
                     participants,
                     completed_agents,
+                    rounds_completed=self._rounds_completed(message_counts),
+                    context_chars=context_chars,
                 )
 
             for event in await poll_events():
-                event_key = event.event_id or f"anonymous-{len(events_by_id)}"
-                events_by_id.setdefault(event_key, event)
+                event_key = event.event_id or (
+                    f"anonymous-{hash((event.agent, event.event_type, event.content))}"
+                )
+                if event_key in events_by_id:
+                    continue
                 content = event.content.strip()
+                event_chars = len(content)
+                if context_chars + event_chars > self.policy.max_context_chars:
+                    return self._outcome(
+                        SupervisionStatus.COMPLETED,
+                        "Konsey bağlam bütçesine ulaştı; açık uzlaşma oluşmadı.",
+                        events_by_id,
+                        participants,
+                        completed_agents,
+                        rounds_completed=self._rounds_completed(message_counts),
+                        context_chars=context_chars,
+                        context_truncated=True,
+                    )
+                events_by_id[event_key] = event
+                context_chars += event_chars
                 if (
                     event.agent
                     and event.agent in expected
@@ -111,19 +144,30 @@ class CollaborationSupervisor:
                     and content
                 ):
                     participants.add(event.agent)
-                if event.agent and self.policy.done_marker in content:
+                    message_counts[event.agent] += 1
+                if event.agent in expected and self.policy.done_marker in content:
                     completed_agents.add(event.agent)
-                if self.policy.consensus_marker in content and self._quorum_met(
-                    participants, expected
-                ):
-                    return self._outcome(
-                        SupervisionStatus.COMPLETED,
-                        "Ajanlar açık uzlaşma işareti üretti.",
-                        events_by_id,
-                        participants,
-                        completed_agents,
-                        consensus=True,
-                    )
+                if event.agent in expected and self.policy.consensus_marker in content:
+                    consensus_seen = True
+
+            rounds_completed = self._rounds_completed(message_counts)
+            if rounds_completed >= self.policy.max_rounds:
+                consensus_reached = consensus_seen and self._quorum_met(participants, expected)
+                reason = (
+                    "Ajanlar tur sınırında açık uzlaşma işareti üretti."
+                    if consensus_reached
+                    else "Konsey azami ortak çalışma turuna ulaştı."
+                )
+                return self._outcome(
+                    SupervisionStatus.COMPLETED,
+                    reason,
+                    events_by_id,
+                    participants,
+                    completed_agents,
+                    consensus=consensus_reached,
+                    rounds_completed=rounds_completed,
+                    context_chars=context_chars,
+                )
 
             if expected.issubset(completed_agents):
                 return self._outcome(
@@ -132,6 +176,8 @@ class CollaborationSupervisor:
                     events_by_id,
                     participants,
                     completed_agents,
+                    rounds_completed=rounds_completed,
+                    context_chars=context_chars,
                 )
 
             states = {state.name: state.status.lower() for state in await poll_states()}
@@ -145,6 +191,8 @@ class CollaborationSupervisor:
                     events_by_id,
                     participants,
                     completed_agents,
+                    rounds_completed=rounds_completed,
+                    context_chars=context_chars,
                 )
 
             all_quiescent = expected.issubset(states) and all(
@@ -159,6 +207,8 @@ class CollaborationSupervisor:
                         events_by_id,
                         participants,
                         completed_agents,
+                        rounds_completed=rounds_completed,
+                        context_chars=context_chars,
                     )
             else:
                 idle_since = None
@@ -170,6 +220,10 @@ class CollaborationSupervisor:
         return len(participants & expected) >= required
 
     @staticmethod
+    def _rounds_completed(message_counts: dict[str, int]) -> int:
+        return min(message_counts.values(), default=0)
+
+    @staticmethod
     def _outcome(
         status: SupervisionStatus,
         reason: str,
@@ -178,6 +232,9 @@ class CollaborationSupervisor:
         completed_agents: set[str],
         *,
         consensus: bool = False,
+        rounds_completed: int = 0,
+        context_chars: int = 0,
+        context_truncated: bool = False,
     ) -> SupervisionOutcome:
         return SupervisionOutcome(
             status=status,
@@ -186,4 +243,7 @@ class CollaborationSupervisor:
             participants=set(participants),
             completed_agents=set(completed_agents),
             consensus_reached=consensus,
+            rounds_completed=rounds_completed,
+            context_chars=context_chars,
+            context_truncated=context_truncated,
         )

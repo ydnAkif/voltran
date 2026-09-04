@@ -233,14 +233,18 @@ class ExecutionEngine:
                 )
                 mission = (
                     f"VOLTRAN ortak görevi başladı. Ekip: {addresses}. {permission_note} "
-                    "Birbirinizin görüşünü isteyin, itirazları doğrudan tartışın ve görev "
-                    "devredin. Kendi katkın bittiğinde VOLTRAN_DONE yaz. En az iki ajan "
+                    "En fazla iki ortak tur çalışın; her turda her ajan en az bir anlamlı "
+                    "mesaj üretsin. Birbirinizin görüşünü isteyin ve itirazları doğrudan "
+                    "tartışın. Kendi katkın bittiğinde VOLTRAN_DONE yaz. En az iki ajan "
                     "ortak karara vardığında nihai mesajda VOLTRAN_CONSENSUS kullan."
                 )
                 await self.collaboration_runtime.send_to_role(session, role.name, mission)
 
             supervisor = self.supervisor or CollaborationSupervisor(
-                SupervisorPolicy(timeout_seconds=plan.policy.timeout_seconds)
+                SupervisorPolicy(
+                    timeout_seconds=plan.policy.timeout_seconds,
+                    max_context_chars=plan.policy.max_output_chars,
+                )
             )
             outcome = await supervisor.monitor(
                 expected_agents=list(session.event_names.values()),
@@ -253,15 +257,13 @@ class ExecutionEngine:
             for index, (role, subtask) in enumerate(
                 zip(roles, plan.subtasks, strict=True), start=1
             ):
-                transcript = await self.collaboration_runtime.get_transcript(session, role.name)
-
                 event_name = session.event_names[role.name]
                 messages = [
                     event.content
                     for event in outcome.events
                     if event.agent == event_name and event.content.strip()
                 ]
-                summary = transcript.strip() or "\n".join(messages).strip()
+                summary = "\n".join(messages).strip()
                 participated = event_name in outcome.participants
                 status = ExecutionStatus.SUCCESS if participated else ExecutionStatus.FAILED
                 executions.append(
