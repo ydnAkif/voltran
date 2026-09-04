@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import time
+from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from voltran.collaboration import AgentRole, CollaborationRuntime
@@ -23,9 +26,74 @@ from voltran.providers import ProviderAdapter, default_registry
 from voltran.sanitizer import sanitize_for_provider
 from voltran.supervisor import (
     CollaborationSupervisor,
-    SupervisionStatus,
+    EventLike,
     SupervisorPolicy,
 )
+
+
+def _json_object(value: str) -> dict[str, object] | None:
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(value):
+        if character != "{":
+            continue
+        try:
+            payload: object
+            payload, _ = decoder.raw_decode(value[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            dict_obj = cast(dict[object, object], payload)
+            return {str(key): item for key, item in dict_obj.items()}
+    return None
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    list_obj = cast(list[object], value)
+    return [str(item).strip() for item in list_obj if str(item).strip()]
+
+
+def _deduplicate(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(values))
+
+
+def _extract_council_decision(
+    events: Sequence[EventLike], participants: set[str]
+) -> tuple[list[str], list[str], str | None]:
+    """Açık karar kayıtlarını çıkar; serbest metinden çoğunluk/uzlaşma tahmin etme."""
+
+    consensus: list[str] = []
+    disagreements: list[str] = []
+    final_summary: str | None = None
+    disagreement_marker = "VOLTRAN_DISAGREEMENT:"
+
+    for event in events:
+        if event.agent not in participants:
+            continue
+        content = event.content.strip()
+        if disagreement_marker in content:
+            objection = content.split(disagreement_marker, 1)[1].strip()
+            payload = _json_object(objection)
+            if payload is not None:
+                disagreements.extend(_string_list(payload.get("disagreements")))
+            elif objection:
+                disagreements.append(objection)
+        if "VOLTRAN_CONSENSUS" not in content:
+            continue
+        decision = content.split("VOLTRAN_CONSENSUS", 1)[1].strip()
+        payload = _json_object(decision)
+        if payload is not None:
+            consensus.extend(_string_list(payload.get("consensus")))
+            disagreements.extend(_string_list(payload.get("disagreements")))
+            summary = payload.get("summary")
+            if isinstance(summary, str) and summary.strip():
+                final_summary = summary.strip()
+        elif decision:
+            consensus.append(decision)
+            final_summary = decision
+
+    return _deduplicate(consensus), _deduplicate(disagreements), final_summary
 
 
 class ExecutionEngine:
@@ -242,8 +310,11 @@ class ExecutionEngine:
                     f"VOLTRAN ortak görevi başladı. Ekip: {addresses}. {permission_note} "
                     "En fazla iki ortak tur çalışın; her turda her ajan en az bir anlamlı "
                     "mesaj üretsin. Birbirinizin görüşünü isteyin ve itirazları doğrudan "
-                    "tartışın. Kendi katkın bittiğinde VOLTRAN_DONE yaz. En az iki ajan "
-                    "ortak karara vardığında nihai mesajda VOLTRAN_CONSENSUS kullan."
+                    "tartışın. Çözülmeyen her itirazı `VOLTRAN_DISAGREEMENT: açıklama` "
+                    "biçiminde kaydet. Kendi katkın bittiğinde VOLTRAN_DONE yaz. En az iki "
+                    "ajan ortak karara vardığında nihai mesajı "
+                    '`VOLTRAN_CONSENSUS {"summary":"...","consensus":["..."],'
+                    '"disagreements":["..."]}` biçiminde yaz.'
                 )
                 await self.collaboration_runtime.send_to_role(session, role.name, mission)
 
@@ -303,35 +374,29 @@ class ExecutionEngine:
                     )
                     transcript_parts.append(header)
 
-            consensus_messages = [
-                event.content.replace("VOLTRAN_CONSENSUS", "").strip()
-                for event in outcome.events
-                if event.agent in outcome.participants and "VOLTRAN_CONSENSUS" in event.content
-            ]
-            final_summary = next(
-                (message for message in reversed(consensus_messages) if message),
-                "\n\n".join(transcript_parts) or outcome.reason,
+            consensus, disagreements, decision_summary = _extract_council_decision(
+                outcome.events, outcome.participants
             )
+            if not outcome.consensus_reached:
+                disagreements.append("Açık ve doğrulanmış konsey uzlaşması oluşmadı.")
+            disagreements = _deduplicate(disagreements)
+            final_summary = decision_summary or "\n\n".join(transcript_parts) or outcome.reason
             successful_count = sum(
                 execution.status is ExecutionStatus.SUCCESS for execution in executions
             )
             synthesis = CouncilSynthesis(
-                consensus=[outcome.reason] if outcome.consensus_reached else [],
-                disagreements=(
-                    []
-                    if outcome.consensus_reached
-                    else ["Açık VOLTRAN_CONSENSUS işareti oluşmadı."]
-                ),
+                consensus=consensus if outcome.consensus_reached else [],
+                disagreements=disagreements,
                 confidence_score=(
                     0.9
-                    if outcome.consensus_reached and successful_count >= 3
+                    if outcome.consensus_reached and successful_count >= 3 and not disagreements
                     else 0.75
-                    if outcome.status is SupervisionStatus.COMPLETED
+                    if outcome.consensus_reached
                     else 0.4
                 ),
                 confidence_rationale=(
-                    f"{successful_count} ajan canlı hcom oturumunda mesaj ve durum "
-                    "olayları üzerinden izlendi."
+                    f"{successful_count} ajan, {outcome.rounds_completed} tamamlanmış tur ve "
+                    f"{outcome.context_chars} karakter olay bağlamı üzerinden izlendi."
                 ),
             )
             return ExecutionReport(

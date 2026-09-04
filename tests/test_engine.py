@@ -216,18 +216,30 @@ class _FakeSupervisor:
             status=SupervisionStatus.COMPLETED,
             reason="Ajanlar açık uzlaşma işareti üretti.",
             events=[
-                HcomEvent("1", "", "message", "agent0", content="İlk görüş"),
+                HcomEvent(
+                    "1",
+                    "",
+                    "message",
+                    "agent0",
+                    content="VOLTRAN_DISAGREEMENT: Veritabanı seçimi çözülmedi.",
+                ),
                 HcomEvent(
                     "2",
                     "",
                     "message",
                     "agent1",
-                    content="Ortak nihai karar VOLTRAN_CONSENSUS",
+                    content=(
+                        'VOLTRAN_CONSENSUS {"summary":"Ortak nihai karar",'
+                        '"consensus":["Katmanlı mimari kullanılacak."],'
+                        '"disagreements":["Önbellek seçimi açık."]}'
+                    ),
                 ),
                 HcomEvent("3", "", "message", "agent2", content="VOLTRAN_DONE"),
             ],
             participants={"agent0", "agent1", "agent2"},
             consensus_reached=True,
+            rounds_completed=2,
+            context_chars=240,
         )
 
 
@@ -280,7 +292,12 @@ def test_engine_executes_council_through_live_collaboration_runtime() -> None:
 
         assert report.mode == ExecutionMode.COUNCIL
         assert report.synthesis is not None
-        assert report.synthesis.confidence_score >= 0.8
+        assert report.synthesis.confidence_score == 0.75
+        assert report.synthesis.consensus == ["Katmanlı mimari kullanılacak."]
+        assert report.synthesis.disagreements == [
+            "Veritabanı seçimi çözülmedi.",
+            "Önbellek seçimi açık.",
+        ]
         assert len(report.executions) == 3
         assert report.final_summary == "Ortak nihai karar"
         assert len(runtime.sent_roles) == 3
