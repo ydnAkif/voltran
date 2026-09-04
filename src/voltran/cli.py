@@ -657,6 +657,33 @@ def replay(
         console.print(f"\n[green]Rapor kaydedildi:[/green] {output}")
 
 
+def _process_command_line(pid: int) -> str | None:
+    """Verilen PID'in komut satırını döndürür; süreç yoksa None.
+
+    `voltran cancel`, veritabanındaki bir PID'e sinyal göndermeden önce o PID'in
+    hâlâ *bizim* sürecimiz olduğunu doğrulamak zorundadır. Çöken bir çalıştırma
+    `active_runs` satırını geride bırakır ve işletim sistemi o PID'i bir süre
+    sonra başka bir uygulamaya verir; doğrulama olmadan iptal komutu ilgisiz bir
+    süreci öldürür.
+    """
+
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "args="],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=3.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
 @app.command()
 def cancel(
     run_id: Annotated[
@@ -686,14 +713,43 @@ def cancel(
         raise typer.Exit(code=1)
 
     pid = active["pid"]
+
+    # PID kimliğini doğrula. Aksi hâlde çöken bir çalıştırmadan kalan bayat kayıt,
+    # işletim sisteminin aynı PID'i verdiği ilgisiz bir sürecin öldürülmesine yol açar.
+    command_line = _process_command_line(pid)
+    if command_line is None:
+        store.unregister_active_run(run_id)
+        store.mark_run_cancelled(run_id)
+        console.print(
+            f"[yellow]Süreç zaten çalışmıyor:[/yellow] {run_id} (PID {pid}). "
+            "Geride kalan kayıt temizlendi."
+        )
+        return
+    if "voltran" not in command_line.lower():
+        store.unregister_active_run(run_id)
+        console.print(
+            f"[red]Güvenlik durdurması:[/red] PID {pid} artık bir VOLTRAN süreci değil "
+            "(muhtemelen çöken bir çalıştırmadan kalan kayıt ve PID yeniden kullanılmış). "
+            "Hiçbir sinyal gönderilmedi; bayat kayıt temizlendi."
+        )
+        raise typer.Exit(code=1)
+
+    def _signal_process(sig: signal.Signals) -> None:
+        """Süreci ve yalnızca ona ait olan süreç grubunu sonlandır."""
+
+        if os.name == "posix":
+            with suppress(ProcessLookupError, PermissionError):
+                # Yalnızca kendi grubunun lideriyse gruba sinyal gönder. Etkileşimsiz
+                # bir kabukta voltran, çağıranın süreç grubunu miras alır; grubu
+                # körlemesine öldürmek çağıran betiği de kapatırdı.
+                if os.getpgid(pid) == pid:
+                    os.killpg(pid, sig)
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, sig)
+
     terminated = False
     try:
-        if os.name == "posix":
-            with suppress(ProcessLookupError):
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, signal.SIGTERM)
-        with suppress(ProcessLookupError):
-            os.kill(pid, signal.SIGTERM)
+        _signal_process(signal.SIGTERM)
 
         for _ in range(10):
             try:
@@ -704,11 +760,7 @@ def cancel(
                 break
 
         if not terminated:
-            if os.name == "posix":
-                with suppress(ProcessLookupError):
-                    os.killpg(os.getpgid(pid), signal.SIGKILL)
-            with suppress(ProcessLookupError):
-                os.kill(pid, signal.SIGKILL)
+            _signal_process(signal.SIGKILL)
     except Exception as exc:
         console.print(f"[red]İptal işlemi sırasında hata oluştu:[/red] {exc}")
         raise typer.Exit(code=1) from exc

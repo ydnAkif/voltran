@@ -25,6 +25,7 @@
   - [Canlı Terminal Paneli (`voltran dashboard`)](#️-canlı-terminal-gösterge-paneli-voltran-dashboard)
   - [Model Kıyaslama (`voltran bench`)](#-görev-bazlı-kıyaslama-ve-değerlendirme-voltran-bench)
   - [Geçmiş Kayıtları (`voltran history`)](#-çalışma-geçmişi-voltran-history)
+  - [Yeniden Oynatma ve İptal (`voltran replay` / `cancel`)](#-yeniden-oynatma-ve-iptal-voltran-replay-voltran-cancel)
   - [Katmanlı Yapılandırma (`voltran config`)](#️-katmanlı-yapılandırma-voltran-config)
 - [Tasarım İlkeleri ve Güvenlik](#tasarım-ilkeleri)
 - [Yol Haritası](#yol-haritası)
@@ -235,6 +236,21 @@ Yerel SQLite veritabanındaki son çalışmaları listeler:
 ```bash
 uv run voltran history
 ```
+
+### 🔁 Yeniden Oynatma ve İptal (`voltran replay`, `voltran cancel`)
+Geçmiş bir çalıştırma, kaydedilmiş planı ve politikasıyla birlikte yeniden çalıştırılabilir;
+devam eden bir çalıştırma ise kimliğiyle iptal edilebilir:
+```bash
+uv run voltran replay <run_id> --explain
+uv run voltran cancel <run_id>
+```
+
+> **İptal güvenliği:** `voltran cancel`, sinyal göndermeden önce hedef PID'in gerçekten bir
+> VOLTRAN süreci olduğunu doğrular. Çöken bir çalıştırma geride kayıt bırakabilir ve işletim
+> sistemi o PID'i bir süre sonra başka bir uygulamaya verir; doğrulama olmasa iptal komutu
+> ilgisiz bir süreci öldürürdü. Süreç grubuna sinyal yalnızca hedef kendi grubunun lideriyse
+> gönderilir — etkileşimsiz bir kabukta VOLTRAN çağıranın grubunu miras alır ve grubu
+> körlemesine öldürmek çağıran betiği de kapatırdı. Eşleşmeyen kayıt öldürülmez, temizlenir.
 
 ### ⚙️ Katmanlı Yapılandırma (`voltran config`)
 Ayarlar dört katmandan, şu öncelikle birleştirilir: **komut satırı > proje > kullanıcı > güvenli varsayılan.**

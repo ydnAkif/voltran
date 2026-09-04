@@ -1,5 +1,6 @@
 import json
 import os
+import signal
 from pathlib import Path
 
 from pytest import MonkeyPatch
@@ -9,6 +10,11 @@ from voltran.cli import app
 from voltran.models import CheckStatus, DoctorCheck, DoctorReport
 
 runner = CliRunner()
+
+
+def _voltran_command(pid: int) -> str:
+    del pid
+    return "/usr/local/bin/voltran run görev"
 
 
 def _report(status: str = "ready") -> DoctorReport:
@@ -447,6 +453,9 @@ def test_cancel_command(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     # 3. Aktif çalıştırma (mock os.kill ile)
     store.register_active_run("active-id", pid=999999, mode="quick", prompt="aktif görev")
 
+    # PID kimlik doğrulaması: hedefin gerçekten bir voltran süreci olduğunu bildir.
+    monkeypatch.setattr("voltran.cli._process_command_line", _voltran_command)
+
     def fake_kill(pid: int, sig: int) -> None:
         del pid, sig
 
@@ -475,3 +484,123 @@ def test_run_keyboard_interrupt(monkeypatch: MonkeyPatch, tmp_path: Path) -> Non
     result = runner.invoke(app, ["run", "kesilecek görev", "--dry-run"])
     assert result.exit_code == 130
     assert "kullanıcı tarafından iptal edildi" in result.stdout
+
+
+def _register_active(run_id: str, pid: int) -> None:
+    from voltran.store import RunStore
+
+    RunStore().register_active_run(run_id, pid, "expert", "uzun görev")
+
+
+def test_cancel_refuses_to_kill_a_recycled_pid(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    """Çöken bir çalıştırmadan kalan PID başka bir uygulamaya verilmiş olabilir."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "veri"))
+    _register_active("hayalet", 4242)
+
+    def _foreign_command(pid: int) -> str:
+        del pid
+        return "/usr/bin/postgres -D /var/lib/postgresql/data"
+
+    signals: list[tuple[int, int]] = []
+
+    def _record_kill(pid: int, sig: int) -> None:
+        signals.append((pid, sig))
+
+    monkeypatch.setattr("voltran.cli._process_command_line", _foreign_command)
+    monkeypatch.setattr("os.kill", _record_kill)
+
+    result = runner.invoke(app, ["cancel", "hayalet"])
+
+    assert result.exit_code == 1
+    assert "Güvenlik durdurması" in result.stdout
+    assert signals == []  # hiçbir sinyal gönderilmemeli
+
+    from voltran.store import RunStore
+
+    assert RunStore().get_active_run("hayalet") is None
+
+
+def test_cancel_cleans_up_when_the_process_is_gone(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "veri"))
+    _register_active("olu", 999_999)
+
+    def _no_process(pid: int) -> str | None:
+        del pid
+        return None
+
+    monkeypatch.setattr("voltran.cli._process_command_line", _no_process)
+
+    result = runner.invoke(app, ["cancel", "olu"])
+
+    assert result.exit_code == 0
+    assert "Süreç zaten çalışmıyor" in result.stdout
+
+    from voltran.store import RunStore
+
+    assert RunStore().get_active_run("olu") is None
+
+
+def test_cancel_signals_a_genuine_voltran_process(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "veri"))
+    _register_active("gercek", 4242)
+
+    signalled: list[tuple[int, int]] = []
+    killed_groups: list[tuple[int, int]] = []
+
+    def _fake_kill(pid: int, sig: int) -> None:
+        if sig == 0:
+            raise ProcessLookupError  # yoklamada süreç kapanmış say
+        signalled.append((pid, sig))
+
+    def _own_group(pid: int) -> int:
+        return pid
+
+    def _record_killpg(pgid: int, sig: int) -> None:
+        killed_groups.append((pgid, sig))
+
+    monkeypatch.setattr("voltran.cli._process_command_line", _voltran_command)
+    monkeypatch.setattr("os.kill", _fake_kill)
+    monkeypatch.setattr("os.getpgid", _own_group)
+    monkeypatch.setattr("os.killpg", _record_killpg)
+
+    result = runner.invoke(app, ["cancel", "gercek"])
+
+    assert result.exit_code == 0
+    assert "başarıyla iptal edildi" in result.stdout
+    assert (4242, int(signal.SIGTERM)) in signalled
+    assert killed_groups == [(4242, int(signal.SIGTERM))]
+
+
+def test_cancel_does_not_kill_the_group_when_not_group_leader(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Etkileşimsiz kabukta voltran çağıranın grubunu miras alır; grup öldürülmemeli."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "veri"))
+    _register_active("grup", 4242)
+
+    killed_groups: list[tuple[int, int]] = []
+
+    def _noop_kill(pid: int, sig: int) -> None:
+        del pid, sig
+
+    def _callers_group(pid: int) -> int:
+        del pid
+        return 1000  # çağıran betiğin süreç grubu
+
+    def _record_killpg(pgid: int, sig: int) -> None:
+        killed_groups.append((pgid, sig))
+
+    monkeypatch.setattr("voltran.cli._process_command_line", _voltran_command)
+    monkeypatch.setattr("os.kill", _noop_kill)
+    monkeypatch.setattr("os.getpgid", _callers_group)
+    monkeypatch.setattr("os.killpg", _record_killpg)
+
+    runner.invoke(app, ["cancel", "grup"])
+
+    assert killed_groups == []
