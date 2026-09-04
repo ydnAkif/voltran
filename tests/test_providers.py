@@ -94,6 +94,26 @@ def test_provider_normalizes_fenced_structured_result() -> None:
     assert result.artifacts == ["report.md"]
 
 
+def test_provider_normalizes_known_status_aliases() -> None:
+    adapter = _PythonAdapter("pass")
+
+    for status in ("SUCCESS", "ok", "completed", "done", "başarılı"):
+        result = adapter.normalize_result(json.dumps({"summary": "sonuç", "status": status}))
+        assert result.status == "success"
+
+    for status in ("ERROR", "failed", "failure", "başarısız"):
+        result = adapter.normalize_result(json.dumps({"summary": "hata", "status": status}))
+        assert result.status == "error"
+
+
+def test_provider_preserves_unknown_status_as_contract_failure() -> None:
+    result = _PythonAdapter("pass").normalize_result(
+        json.dumps({"summary": "belirsiz", "status": "maybe"})
+    )
+
+    assert result.status == "maybe"
+
+
 def test_antigravity_normalizes_structured_response_contract() -> None:
     response = {
         "summary": "sonuç",

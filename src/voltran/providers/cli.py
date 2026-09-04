@@ -28,6 +28,8 @@ ExecutableFinder = Callable[[str], str | None]
 
 _EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _SECRET_PATTERN = re.compile(r"(?i)\b(?:bearer\s+)?(?:sk-[A-Za-z0-9_-]{12,}|[A-Za-z0-9_-]{32,})\b")
+_SUCCESS_STATUS_ALIASES = frozenset({"success", "ok", "completed", "done", "başarılı"})
+_ERROR_STATUS_ALIASES = frozenset({"error", "failed", "failure", "başarısız"})
 
 
 def _safe_error(value: str, *, limit: int = 400) -> str:
@@ -300,7 +302,13 @@ class CliProviderAdapter(ABC):
             try:
                 payload, _ = decoder.raw_decode(text[index:])
                 if isinstance(payload, dict):
-                    return TaskResult.model_validate(payload)
+                    result = TaskResult.model_validate(payload)
+                    normalized_status = result.status.strip().casefold()
+                    if normalized_status in _SUCCESS_STATUS_ALIASES:
+                        result.status = "success"
+                    elif normalized_status in _ERROR_STATUS_ALIASES:
+                        result.status = "error"
+                    return result
             except (json.JSONDecodeError, ValidationError):
                 continue
         return TaskResult(summary=text, status="success")
