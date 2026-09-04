@@ -73,6 +73,8 @@ def test_provider_prompt_requests_complete_json_contract() -> None:
         "status",
     ):
         assert field in prompt
+    assert 'status="success" (hata durumunda "error")' in prompt
+    assert "Başka status değeri kullanma" in prompt
 
 
 def test_provider_normalizes_fenced_structured_result() -> None:

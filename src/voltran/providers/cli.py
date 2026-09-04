@@ -130,8 +130,8 @@ class CliProviderAdapter(ABC):
                 "ÇIKTI SÖZLEŞMESİ: Yalnızca geçerli bir JSON nesnesi döndür. "
                 "Zorunlu alanlar ve türleri: summary=string; claims=string[]; "
                 "evidence=string[]; uncertainties=string[]; risks=string[]; "
-                "artifacts=string[]; status=string. Alanları atlama; bilgi yoksa "
-                "boş liste kullan."
+                'artifacts=string[]; status="success" (hata durumunda "error"). '
+                "Başka status değeri kullanma. Alanları atlama; bilgi yoksa boş liste kullan."
             ),
         ]
         if task.role:
