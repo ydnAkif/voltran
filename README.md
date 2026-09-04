@@ -289,6 +289,11 @@ blind = false
 > anahtar veya yanlış tür de sessizce yok sayılmaz, hata verir — yazım hatası olan bir ayarın
 > uygulandığını sanmayasınız diye.
 
+`--write` etkin olduğunda sağlayıcılar aktif checkout yerine HEAD commitinden oluşturulan geçici,
+detached Git worktree içinde çalışır. Ana çalışma ağacındaki kirli değişiklikler göreve taşınmaz ve
+model değişiklikleri otomatik uygulanmaz. Değişiklik oluşursa rapor, inceleme worktree'sini ve
+`changes.patch` dosyasını gösterir; doğrulama kanıtı aynı dizindeki `verification.txt` içindedir.
+
 ### 🔜 Geliştirilmekte Olan Komutlar
 ```bash
 voltran login codex

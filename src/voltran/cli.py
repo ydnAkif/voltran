@@ -343,11 +343,18 @@ def run(
         )
         raise typer.Exit(code=1)
 
+    engine = ExecutionEngine()
     try:
-        engine = ExecutionEngine()
         report = asyncio.run(engine.execute_plan(prompt, plan, dry_run=dry_run))
     except KeyboardInterrupt:
         console.print("\n[yellow]Çalıştırma kullanıcı tarafından iptal edildi.[/yellow]")
+        outcome = engine.last_workspace_outcome
+        if outcome is not None and outcome.worktree.exists():
+            console.print(
+                f"[yellow]İzole çalışma alanı inceleme için korundu:[/yellow] {outcome.worktree}"
+            )
+            if outcome.patch_file is not None:
+                console.print(f"[yellow]Değişiklik yaması:[/yellow] {outcome.patch_file}")
         raise typer.Exit(code=130) from None
     finally:
         if file and allow_writes:

@@ -4,6 +4,8 @@ import asyncio
 from pathlib import Path
 from typing import cast
 
+from pytest import MonkeyPatch, mark, raises
+
 from voltran.collaboration import AgentRole, CollaborationRuntime, CollaborationSession
 from voltran.engine import ExecutionEngine
 from voltran.hcom_client import HcomAgentInfo, HcomClient, HcomClientError, HcomEvent
@@ -82,6 +84,135 @@ class _DummyAdapter:
 
     def normalize_result(self, raw_output: str) -> TaskResult:
         return TaskResult(summary=raw_output, status="success")
+
+
+class _WritingAdapter(_DummyAdapter):
+    async def execute(
+        self,
+        task: ProviderTask,
+        context: str | None,
+        policy: ExecutionPolicy,
+    ) -> ProviderExecution:
+        (task.working_directory / "generated.txt").write_text("isolated\n", encoding="utf-8")
+        execution = await super().execute(task, context, policy)
+        if execution.result is not None:
+            execution.result.evidence.append("pytest: 1 passed")
+        return execution
+
+
+class _LifecycleAdapter(_DummyAdapter):
+    def __init__(self, status: ExecutionStatus | None) -> None:
+        super().__init__("claude", "unused")
+        self.status = status
+
+    async def execute(
+        self,
+        task: ProviderTask,
+        context: str | None,
+        policy: ExecutionPolicy,
+    ) -> ProviderExecution:
+        del context, policy
+        self.received_tasks.append(task)
+        if self.status is None:
+            raise asyncio.CancelledError
+        return ProviderExecution(
+            run_id=task.task_id,
+            provider=self.key,
+            status=self.status,
+            duration_ms=1,
+            error="stopped",
+        )
+
+
+def _init_git_repository(path: Path) -> None:
+    import subprocess
+
+    subprocess.run(("git", "init"), cwd=path, check=True, capture_output=True)
+    subprocess.run(("git", "config", "user.email", "tests@voltran.invalid"), cwd=path, check=True)
+    subprocess.run(("git", "config", "user.name", "VOLTRAN Tests"), cwd=path, check=True)
+    (path / "tracked.txt").write_text("source\n", encoding="utf-8")
+    subprocess.run(("git", "add", "."), cwd=path, check=True)
+    subprocess.run(("git", "commit", "-m", "initial"), cwd=path, check=True)
+
+
+def test_write_execution_uses_isolated_worktree(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    _init_git_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "data"))
+
+    async def scenario() -> None:
+        adapter = _WritingAdapter("claude", "done")
+        plan = TaskPlan(
+            mode=ExecutionMode.EXPERT,
+            reasoning="write",
+            policy=ExecutionPolicy(allow_writes=True),
+            subtasks=[SubTask(role="writer", purpose="write", assigned_provider="claude")],
+        )
+
+        report = await ExecutionEngine({"claude": adapter}).execute_plan("write", plan)
+
+        task = adapter.received_tasks[0]
+        assert task.working_directory != tmp_path
+        assert (task.working_directory / "generated.txt").exists()
+        assert not (tmp_path / "generated.txt").exists()
+        assert report.executions[0].result is not None
+        metadata = report.executions[0].result.metadata
+        assert Path(metadata["review_patch"]).exists()
+        assert "Ana çalışma ağacına uygulanmadı" in (report.next_step_recommendation or "")
+
+    asyncio.run(scenario())
+
+
+@mark.parametrize("status", [ExecutionStatus.FAILED, ExecutionStatus.TIMED_OUT])
+def test_write_workspace_is_cleaned_after_failure_or_timeout(
+    tmp_path: Path, monkeypatch: MonkeyPatch, status: ExecutionStatus
+) -> None:
+    _init_git_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "data"))
+
+    async def scenario() -> None:
+        adapter = _LifecycleAdapter(status)
+        plan = TaskPlan(
+            mode=ExecutionMode.EXPERT,
+            reasoning="lifecycle",
+            policy=ExecutionPolicy(allow_writes=True),
+            subtasks=[SubTask(role="worker", purpose="work", assigned_provider="claude")],
+        )
+        engine = ExecutionEngine({"claude": adapter})
+
+        await engine.execute_plan("work", plan)
+
+        assert engine.last_workspace_outcome is not None
+        assert not engine.last_workspace_outcome.worktree.exists()
+
+    asyncio.run(scenario())
+
+
+def test_write_workspace_is_cleaned_after_cancellation(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
+    _init_git_repository(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_DATA_DIR", str(tmp_path / "data"))
+
+    async def scenario() -> None:
+        adapter = _LifecycleAdapter(None)
+        plan = TaskPlan(
+            mode=ExecutionMode.EXPERT,
+            reasoning="cancel",
+            policy=ExecutionPolicy(allow_writes=True),
+            subtasks=[SubTask(role="worker", purpose="work", assigned_provider="claude")],
+        )
+        engine = ExecutionEngine({"claude": adapter})
+
+        with raises(asyncio.CancelledError):
+            await engine.execute_plan("work", plan)
+
+        assert engine.last_workspace_outcome is not None
+        assert not engine.last_workspace_outcome.worktree.exists()
+
+    asyncio.run(scenario())
 
 
 def test_engine_executes_single_mode_forwarding_subtask_role() -> None:

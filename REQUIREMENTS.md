@@ -202,6 +202,11 @@ Model çıktısı doğrudan kabuk komutu olarak çalıştırılmamalı; çalış
 
 Sağlayıcı süreçleri yalnızca görev için izin verilen dosya ve klasörlere erişebilmelidir.
 
+Durum: **Uygulandı.** `--write` çalışmaları aktif checkout'un HEAD commitinden açılan görev
+bazlı detached Git worktree içinde yürütülür. Değişiklikler ana çalışma ağacına otomatik
+uygulanmaz; inceleme için worktree, binary patch ve sağlayıcının test kanıtı korunur. Değişiklik
+yoksa worktree temizlenir; temizlik hatasında yol raporda bırakılır.
+
 ## 5. İşlevsel olmayan gereksinimler
 
 ### NFR-01 — Platform

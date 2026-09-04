@@ -88,10 +88,12 @@ tür doğrulamasını ve yazma izninin yapılandırılamazlığını; `tests/tes
 
 ### P0 — Git worktree yazma izolasyonu (SEC-07)
 
-- \`--write\` görevlerini aktif checkout yerine görev bazlı geçici worktree'de çalıştır.
-- Kirli çalışma ağacı ve başlangıç ref'i davranışını tanımla.
-- Görev sonunda diff ve test sonucu üret; ana çalışma ağacına otomatik uygulama yapma.
-- Cleanup başarısızsa worktree yolunu koruyup kullanıcıya bildir.
+Durum: **Tamamlandı.**
+
+- [x] `--write` görevlerini aktif checkout yerine görev bazlı geçici worktree'de çalıştır.
+- [x] Başlangıç ref'i olarak HEAD kullan; mevcut kirli değişiklikleri göreve taşımadan koru.
+- [x] Görev sonunda binary patch ve test kanıtı üret; ana çalışma ağacına otomatik uygulama yapma.
+- [x] Cleanup başarısızsa worktree yolunu koruyup kullanıcıya bildir.
 
 Kabul ölçütü:
 

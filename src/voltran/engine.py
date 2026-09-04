@@ -35,6 +35,7 @@ from voltran.supervisor import (
     EventLike,
     SupervisorPolicy,
 )
+from voltran.workspace import IsolatedGitWorkspace, WorkspaceIsolationError, WorkspaceOutcome
 
 
 def _json_object(value: str) -> dict[str, object] | None:
@@ -117,6 +118,7 @@ class ExecutionEngine:
         self._current_run_id: str | None = None
         self._current_session: CollaborationSession | None = None
         self._running_tasks: set[str] = set()
+        self.last_workspace_outcome: WorkspaceOutcome | None = None
 
     async def cancel_run(self, run_id: str | None = None) -> bool:
         """Etkin çalışmayı, adaptör alt süreçlerini ve hcom oturumunu sonlandırır."""
@@ -149,6 +151,16 @@ class ExecutionEngine:
     ) -> ExecutionReport:
         started = time.monotonic()
         run_id = uuid4().hex[:12]
+        self.last_workspace_outcome = None
+        isolated_workspace: IsolatedGitWorkspace | None = None
+        working_directory = plan.context_file.parent if plan.context_file else Path.cwd()
+
+        if plan.policy.allow_writes and not dry_run:
+            try:
+                isolated_workspace = IsolatedGitWorkspace(working_directory, run_id)
+                working_directory = isolated_workspace.working_directory
+            except WorkspaceIsolationError as exc:
+                return self._workspace_failure_report(run_id, prompt, plan, started, str(exc))
 
         # Bağlam dosyasını SEC-04 bütçesiyle oku (varsa). CLI aynı kontrolü önceden
         # yapar; buradaki yakalama, kütüphane olarak kullanımda çökmeyi önler.
@@ -209,15 +221,16 @@ class ExecutionEngine:
 
         store = RunStore()
         store.register_active_run(run_id, os.getpid(), plan.mode.value, prompt)
+        report: ExecutionReport | None = None
         try:
             match plan.mode:
                 case ExecutionMode.COUNCIL:
                     report = await self._execute_council(
-                        run_id, prompt, provider_prompt, plan, context, started
+                        run_id, prompt, provider_prompt, plan, context, started, working_directory
                     )
                 case _:
                     report = await self._execute_single_or_expert(
-                        run_id, prompt, provider_prompt, plan, context, started
+                        run_id, prompt, provider_prompt, plan, context, started, working_directory
                     )
             return report
         except asyncio.CancelledError:
@@ -226,6 +239,20 @@ class ExecutionEngine:
         finally:
             self._current_run_id = None
             store.unregister_active_run(run_id)
+            if isolated_workspace is not None:
+                evidence = [
+                    item
+                    for execution in (report.executions if report is not None else [])
+                    if execution.result is not None
+                    for item in execution.result.evidence
+                    if any(
+                        token in item.casefold() for token in ("test", "pytest", "ruff", "pyright")
+                    )
+                ]
+                outcome = isolated_workspace.finish(evidence)
+                self.last_workspace_outcome = outcome
+                if report is not None:
+                    self._attach_workspace_outcome(report, outcome)
 
     async def _execute_single_or_expert(
         self,
@@ -235,6 +262,7 @@ class ExecutionEngine:
         plan: TaskPlan,
         context: str | None,
         started: float,
+        working_directory: Path,
     ) -> ExecutionReport:
         executions: list[ProviderExecution] = []
         final_summary = ""
@@ -261,6 +289,7 @@ class ExecutionEngine:
                 role=st.role,
                 purpose=st.purpose,
                 model=st.model,
+                working_directory=working_directory,
             )
             self._running_tasks.add(st.subtask_id)
             try:
@@ -300,6 +329,7 @@ class ExecutionEngine:
         plan: TaskPlan,
         context: str | None,
         started: float,
+        working_directory: Path,
     ) -> ExecutionReport:
         """Sağlayıcıları kalıcı hcom oturumlarında canlı olarak birlikte çalıştırır."""
 
@@ -325,7 +355,6 @@ class ExecutionEngine:
             )
             for index, subtask in enumerate(plan.subtasks, start=1)
         ]
-        working_dir = plan.context_file.parent if plan.context_file else Path.cwd()
         session_prompt = provider_prompt
         if context:
             session_prompt += f"\n\nBAĞLAM:\n{context[: plan.policy.max_output_chars]}"
@@ -335,7 +364,7 @@ class ExecutionEngine:
             session = await self.collaboration_runtime.start_session(
                 session_prompt,
                 roles,
-                working_dir=working_dir,
+                working_dir=working_directory,
                 headless=True,
                 allow_writes=plan.policy.allow_writes,
                 blind_mode=plan.policy.blind_mode,
@@ -501,5 +530,52 @@ class ExecutionEngine:
                 confidence_rationale="Canlı hcom işbirliği oturumu kurulamadı.",
             ),
             next_step_recommendation="hcom kurulumunu ve sağlayıcı oturumlarını kontrol edin.",
+            total_duration_ms=execution.duration_ms,
+        )
+
+    @staticmethod
+    def _attach_workspace_outcome(report: ExecutionReport, outcome: WorkspaceOutcome) -> None:
+        if outcome.changed:
+            detail = (
+                f"Yazma işlemi izole worktree'de tutuldu: {outcome.worktree}. "
+                f"İnceleme yaması: {outcome.patch_file}. Ana çalışma ağacına uygulanmadı."
+            )
+            report.next_step_recommendation = detail
+            for execution in report.executions:
+                if execution.result is not None:
+                    execution.result.metadata["isolated_worktree"] = str(outcome.worktree)
+                    execution.result.metadata["review_patch"] = str(outcome.patch_file)
+                    execution.result.metadata["base_revision"] = outcome.base_revision
+        elif outcome.cleanup_error:
+            report.next_step_recommendation = (
+                f"İzole worktree temizlenemedi ve inceleme için korundu: {outcome.worktree}. "
+                f"Hata: {outcome.cleanup_error}"
+            )
+        else:
+            report.next_step_recommendation = "İzole çalışma ağacında dosya değişikliği oluşmadı."
+
+    @staticmethod
+    def _workspace_failure_report(
+        run_id: str,
+        prompt: str,
+        plan: TaskPlan,
+        started: float,
+        error: str,
+    ) -> ExecutionReport:
+        execution = ProviderExecution(
+            run_id=run_id,
+            provider="workspace",
+            status=ExecutionStatus.FAILED,
+            duration_ms=max(0, round((time.monotonic() - started) * 1000)),
+            error=f"SEC-07 izolasyonu kurulamadı: {error}",
+        )
+        return ExecutionReport(
+            run_id=run_id,
+            task_prompt=prompt,
+            mode=plan.mode,
+            plan=plan,
+            executions=[execution],
+            final_summary=execution.error or "SEC-07 izolasyonu kurulamadı.",
+            next_step_recommendation="Görevi bir Git deposunda çalıştırın; yazma izni verilmedi.",
             total_duration_ms=execution.duration_ms,
         )
