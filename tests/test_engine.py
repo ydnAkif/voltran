@@ -380,3 +380,60 @@ def test_engine_dry_run_does_not_execute_providers() -> None:
         assert "Dry Run" in report.executions[0].result.summary
 
     asyncio.run(scenario())
+
+
+def test_engine_applies_context_budget_before_reaching_provider(tmp_path: Path) -> None:
+    """SEC-04: sağlayıcıya giden bağlam politikadaki bütçeyi aşmamalıdır."""
+
+    seen: dict[str, str | None] = {}
+
+    class _BudgetSpyAdapter:
+        key = "codex"
+
+        def availability(self) -> bool:
+            return True
+
+        def capabilities(self) -> ProviderCapabilities:
+            return ProviderCapabilities(file_access=True)
+
+        async def health_check(self) -> ProviderHealth:
+            return ProviderHealth(provider=self.key, available=True, message="ok")
+
+        async def cancel(self, run_id: str) -> bool:
+            return True
+
+        def normalize_result(self, raw_output: str) -> TaskResult:
+            return TaskResult(summary=raw_output, status="success")
+
+        async def execute(
+            self,
+            task: ProviderTask,
+            context: str | None,
+            policy: ExecutionPolicy,
+        ) -> ProviderExecution:
+            seen["context"] = context
+            return ProviderExecution(
+                run_id=task.task_id,
+                provider=self.key,
+                status=ExecutionStatus.SUCCESS,
+                duration_ms=1,
+                result=TaskResult(summary="ok", status="success"),
+            )
+
+    context_file = tmp_path / "buyuk.py"
+    context_file.write_text("A" * 50_000, encoding="utf-8")
+    plan = TaskPlan(
+        mode=ExecutionMode.EXPERT,
+        reasoning="test",
+        subtasks=[SubTask(role="uzman", purpose="", assigned_provider="codex")],
+        context_file=context_file,
+        policy=ExecutionPolicy(max_context_chars=2_000),
+    )
+    registry: dict[str, ProviderAdapter] = {"codex": _BudgetSpyAdapter()}
+
+    asyncio.run(ExecutionEngine(registry=registry).execute_plan("incele", plan))
+
+    sent = seen["context"]
+    assert sent is not None
+    assert len(sent) <= 2_000
+    assert "gönderilmedi" in sent

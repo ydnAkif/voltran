@@ -203,3 +203,53 @@ def test_dry_run_shows_data_sharing_preview(monkeypatch: MonkeyPatch, tmp_path: 
     assert "notlar.txt" in result.stdout
     assert "Tahmini model çağrısı: 1" in result.stdout
     assert "codex" in result.stdout
+
+
+def test_run_rejects_binary_context_file(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    binary = tmp_path / "resim.png"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+
+    result = runner.invoke(app, ["run", "incele", "--file", str(binary), "--dry-run"])
+
+    assert result.exit_code == 2
+    assert "Bağlam dosyası hatası" in result.stdout
+    assert "ikili" in result.stdout
+
+
+def test_run_rejects_invalid_line_range(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "app.py"
+    target.write_text("bir\niki\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app, ["run", "incele", "--file", str(target), "--lines", "40-10", "--dry-run"]
+    )
+
+    assert result.exit_code == 2
+    assert "Satır aralığı ters" in result.stdout
+
+
+def test_dry_run_reports_context_minimisation(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "buyuk.py"
+    target.write_text("x" * 10_000, encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "Bu dosyayı incele",
+            "--file",
+            str(target),
+            "--max-context",
+            "1000",
+            "--provider",
+            "codex",
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "Veri minimizasyonu" in result.stdout
+    assert "gönderilmeyecek" in result.stdout

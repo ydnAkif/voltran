@@ -22,7 +22,7 @@ hata davranışı ve kullanıcı dokümantasyonu birlikte hazırsa tamamlanmış
 | Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç, hata raporu ve `--provider` izin listesi | Kullanıcı iptali (`voltran cancel`) ve paralel alt görev yürütme |
 | Council | Kısmi | hcom oturumu, farklı sağlayıcılar, supervisor, açık uzlaşma işareti, izin listesine uyum ve "en az iki sağlayıcı" şartı | Tur/bağlam bütçesi, güçlü uzlaşma doğrulaması ve devam |
 | Router | Kısmi | Yetenek, erişilebilirlik, moda göre puanlama ve doğrulanan sağlayıcı izin listesi | Kota, maliyet, gecikme ve oturum sağlığı |
-| Gizlilik | Kısmi | Sağlayıcıya gönderim ve SQLite öncesi secret/PII maskeleme, hassasiyet sınıflandırması, hassas görevde otomatik council genişlemesinin engellenmesi, sağlayıcı izin listesi ve dry-run veri paylaşım önizlemesi | Veri minimizasyonu (SEC-04) |
+| Gizlilik | Tamamlandı | Secret/PII maskeleme (giden ve kayıt yolu), hassasiyet sınıflandırması, hassas görevde otomatik council genişlemesinin engellenmesi, sağlayıcı izin listesi, dry-run veri paylaşım önizlemesi ve bağlam bütçesi/bölüm seçimi | SEC-01..SEC-04 karşılandı; kalan gizlilik işi yok |
 | Yazma güvenliği | Kısmi | Atomik süreçler arası dosya kilidi; council'da tek yazıcı | Git worktree izolasyonu ve kontrollü diff uygulama |
 | Raporlama | Kısmi | Markdown/JSON, rol, sağlayıcı, durum ve council güven alanları | Kanıtlar ve isteğe bağlı ham uzman çıktıları |
 | Geçmiş | Kısmi | Maskelenmiş SQLite özeti ve son çalışmalar | Replay/resume |
@@ -58,16 +58,18 @@ rollerinde de görünemez; tek, çoklu, geçersiz, erişilemeyen ve kuru çalı�
 Kabul ölçütü: karşılandı. \`tests/test_classifier.py\` false-negative odaklı senaryoları,
 \`tests/test_commander.py\` ise sessiz genişlemenin engellendiğini doğrular.
 
-### P0 — Veri minimizasyonu (SEC-04)
+### P0 — Veri minimizasyonu (SEC-04) — **Tamamlandı**
 
-- \`--file\` içeriğinin tamamı yerine açık boyut sınırı ve bölüm seçimi sağla.
-- Kesilen ve maskelenen veri miktarını dry-run/rapor metadata'sında göster.
-- Binary, aşırı büyük ve okunamayan dosyalar için kontrollü hata üret.
+- [x] \`--max-context\` karakter bütçesi (varsayılan 40.000) ve \`--lines 120-180\` bölüm seçimi.
+- [x] Bütçe aşılınca dosyanın başı ve sonu korunur; aradan çıkarılan miktar hem modele
+      bırakılan görünür bir işaretle hem de dry-run çıktısında bildirilir.
+- [x] İkili, okunamayan, bulunamayan, dizin olan ve 5 MB üstü dosyalar için kontrollü hata.
+- [x] Hassasiyet sınıflandırması artık dosyanın tamamını değil, sağlayıcıya *fiilen giden*
+      kapsamı değerlendirir.
 
-Kabul ölçütü:
-
-- Büyük dosya sağlayıcı stdin bütçesini aşamaz.
-- Gönderilen kapsam otomatik testte doğrulanabilir.
+Kabul ölçütü: karşılandı. \`tests/test_context.py\` birden çok bütçe için
+\`len(text) <= max_chars\` bağıntısını (kırpma işareti dâhil) doğrular;
+\`tests/test_engine.py\` ise casus adaptörle sağlayıcıya ulaşan bağlamı ölçer.
 
 ### P0 — Git worktree yazma izolasyonu (SEC-07)
 

@@ -13,6 +13,13 @@ from rich.console import Console
 from rich.table import Table
 
 from voltran import __version__
+from voltran.context import (
+    DEFAULT_MAX_CONTEXT_CHARS,
+    ContextError,
+    ContextScope,
+    load_context,
+    parse_line_range,
+)
 from voltran.doctor import build_doctor_report
 from voltran.models import CheckStatus, DoctorReport, ExecutionMode, TaskPlan
 
@@ -74,21 +81,10 @@ def _split_provider_options(values: list[str] | None) -> list[str]:
     return keys
 
 
-def _read_context_text(file: Path | None) -> str | None:
-    """Bağlam dosyasını hassasiyet sınıflandırması için okur; okunamazsa sessiz geçer."""
-
-    if file is None or not file.is_file():
-        return None
-    try:
-        return file.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-
-
 def _render_data_sharing_preview(
     plan: TaskPlan,
     file: Path | None,
-    context_text: str | None,
+    scope: ContextScope | None,
 ) -> None:
     """FR-14: kuru çalışmada hangi verinin hangi sağlayıcıya gideceğini gösterir."""
 
@@ -98,10 +94,8 @@ def _render_data_sharing_preview(
     table.add_column("Paylaşılacak veri")
 
     shared = "Görev metni"
-    if context_text is not None and file is not None:
-        shared = f"Görev metni + `{file.name}` ({len(context_text)} karakter)"
-    elif file is not None:
-        shared = "Görev metni (bağlam dosyası okunamadı)"
+    if scope is not None and file is not None:
+        shared = f"Görev metni + `{file.name}` ({scope.describe()})"
 
     for subtask in plan.subtasks:
         table.add_row(subtask.assigned_provider or "-", subtask.role, shared)
@@ -110,6 +104,11 @@ def _render_data_sharing_preview(
     console.print(f"[dim]Tahmini model çağrısı: {len(plan.subtasks)}[/dim]")
     if plan.sensitivity_categories:
         console.print(f"[dim]Hassas veri sınıfları: {', '.join(plan.sensitivity_categories)}[/dim]")
+    if scope is not None and scope.is_trimmed:
+        console.print(
+            f"[yellow]Veri minimizasyonu:[/yellow] dosyanın {scope.trimmed_chars} karakteri "
+            "sağlayıcıya gönderilmeyecek."
+        )
     console.print(
         "[dim]Gönderim öncesi API anahtarları, erişim belirteçleri, parola atamaları "
         "ve e-posta adresleri maskelenir.[/dim]\n"
@@ -209,6 +208,22 @@ def run(
             ),
         ),
     ] = None,
+    max_context: Annotated[
+        int,
+        typer.Option(
+            "--max-context",
+            min=100,
+            max=2_000_000,
+            help="Bağlam dosyasından sağlayıcıya gönderilecek azami karakter sayısı.",
+        ),
+    ] = DEFAULT_MAX_CONTEXT_CHARS,
+    lines: Annotated[
+        str | None,
+        typer.Option(
+            "--lines",
+            help="Bağlam dosyasından yalnızca bu satır aralığını gönder. Örnek: --lines 40-120",
+        ),
+    ] = None,
 ) -> None:
     """Görevi uygun çalışma modu ve modellerle tek raporda yürüt."""
 
@@ -227,7 +242,19 @@ def run(
         console.print(f"[red]Sağlayıcı seçimi hatası:[/red] {exc}")
         raise typer.Exit(code=2) from exc
 
-    context_text = _read_context_text(file)
+    # SEC-04: bağlam, sınıflandırmadan önce bütçelenir. Böylece hem uyarı hem de
+    # önizleme, dosyanın tamamını değil sağlayıcıya *fiilen giden* kapsamı anlatır.
+    scope: ContextScope | None = None
+    line_range: tuple[int, int] | None = None
+    if file is not None:
+        try:
+            line_range = parse_line_range(lines) if lines else None
+            scope = load_context(file, max_chars=max_context, line_range=line_range)
+        except ContextError as exc:
+            console.print(f"[red]Bağlam dosyası hatası:[/red] {exc}")
+            raise typer.Exit(code=2) from exc
+
+    context_text = scope.text if scope is not None else None
     sensitivity = classify_sensitivity(prompt, context_text)
 
     commander = Commander()
@@ -240,6 +267,8 @@ def run(
     plan.policy.timeout_seconds = timeout
     plan.policy.blind_mode = blind
     plan.policy.allow_writes = allow_writes
+    plan.policy.max_context_chars = max_context
+    plan.policy.context_line_range = line_range
 
     try:
         router.assign_providers(plan, allowed_providers=allowed, dry_run=dry_run)
@@ -274,7 +303,7 @@ def run(
         console.print()
 
     if dry_run and not json_output:
-        _render_data_sharing_preview(plan, file, context_text)
+        _render_data_sharing_preview(plan, file, scope)
 
     lock_mgr = FileLockManager()
     lock_holder = f"voltran-orchestrator-{uuid4().hex}"

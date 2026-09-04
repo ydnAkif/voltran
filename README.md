@@ -172,6 +172,10 @@ uv run voltran run "Mimariyi karşılaştır" -m council --provider codex,google
 # Hangi verinin hangi sağlayıcıya gideceğini kota harcamadan görme:
 uv run voltran run "Bu dosyayı incele" -f app.py --dry-run --explain
 
+# Dosyanın tamamı yerine yalnızca ilgili bölümü gönderme (SEC-04):
+uv run voltran run "Şu fonksiyonu incele" -f app.py --lines 120-180
+uv run voltran run "Bu logu özetle" -f build.log --max-context 8000
+
 # Çöken bir yazma çalışmasından kalan kilidi kaldırma:
 uv run voltran unlock app.py
 uv run voltran unlock --all
@@ -180,6 +184,11 @@ uv run voltran unlock --all
 > **Not:** Görevde finans, sağlık, kimlik, iletişim veya kimlik bilgisi tespit edilirse
 > VOLTRAN uyarı verir ve görevi kendiliğinden `council` moduna genişletmez. Üç sağlayıcıya
 > birden göndermek isterseniz `-m council` ile açıkça belirtmeniz gerekir.
+>
+> Bağlam dosyaları varsayılan olarak 40.000 karakterle sınırlıdır. Sınır aşılırsa dosyanın
+> başı ve sonu korunur, aradan çıkarılan miktar hem modele hem kullanıcıya bildirilir —
+> model eksik dosyayı tam sanmasın diye. İkili, okunamayan ve 5 MB üstü dosyalar
+> gönderilmez; kontrollü hata üretilir.
 
 ### 💡 Kolay Erişim (Global Kurulum)
 `uv run` yazmadan doğrudan `voltran` komutunu kullanmak isterseniz:
@@ -256,7 +265,7 @@ VOLTRAN, bir dosyayı birden fazla sağlayıcıya gönderdiğinde veri fiilen bi
 | Sağlayıcıya gitmeden önce sır maskeleme | ✅ API anahtarı, erişim belirteci, parola ataması ve e-posta maskelenir |
 | Kullanılacak sağlayıcıların işlem öncesinde gösterilmesi | ✅ `--dry-run` veri paylaşım önizlemesi ve `--explain` |
 | Sağlayıcı izin listesi | ✅ `--provider` ile görev bazlı kısıtlama |
-| Yalnızca gerekli dosya parçasının gönderilmesi (veri minimizasyonu) | ⏳ Planlandı — [ROADMAP.md](ROADMAP.md) SEC-04 |
+| Yalnızca gerekli dosya parçasının gönderilmesi (veri minimizasyonu) | ✅ `--max-context` bütçesi ve `--lines` bölüm seçimi; kesilen miktar raporlanır |
 
 Hassas veri tespit edildiğinde uyarı, bulgunun **türünü ve sayısını** gösterir; eşleşen değerin kendisi ne ekrana ne de çalışma geçmişine yazılır:
 

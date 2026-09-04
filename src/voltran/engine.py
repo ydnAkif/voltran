@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from voltran.collaboration import AgentRole, CollaborationRuntime
+from voltran.context import ContextError, load_context
 from voltran.hcom_client import HcomClientError
 from voltran.models import (
     CouncilSynthesis,
@@ -50,13 +51,19 @@ class ExecutionEngine:
         started = time.monotonic()
         run_id = uuid4().hex[:12]
 
-        # Bağlam dosyasını oku (varsa)
+        # Bağlam dosyasını SEC-04 bütçesiyle oku (varsa). CLI aynı kontrolü önceden
+        # yapar; buradaki yakalama, kütüphane olarak kullanımda çökmeyi önler.
         context: str | None = None
-        if plan.context_file is not None and plan.context_file.is_file():
+        if plan.context_file is not None:
             try:
-                context = plan.context_file.read_text(encoding="utf-8", errors="replace")
-            except OSError as exc:
-                context = f"[Bağlam dosyası okunamadı: {exc}]"
+                scope = load_context(
+                    plan.context_file,
+                    max_chars=plan.policy.max_context_chars,
+                    line_range=plan.policy.context_line_range,
+                )
+                context = scope.text
+            except ContextError as exc:
+                context = f"[Bağlam dosyası kullanılamadı: {exc}]"
 
         # Gizli değerler sağlayıcı süreçlerine ulaşmadan önce maskelenir.
         provider_prompt = sanitize_for_provider(prompt)

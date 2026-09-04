@@ -102,6 +102,10 @@ class ExecutionPolicy(BaseModel):
     blind_mode: bool = False
     allowed_tools: tuple[str, ...] = ()
     max_output_chars: int = Field(default=200_000, ge=1_000, le=2_000_000)
+    # SEC-04: bağlam dosyasından sağlayıcıya gönderilecek azami karakter sayısı.
+    max_context_chars: int = Field(default=40_000, ge=100, le=2_000_000)
+    # SEC-04: yalnızca bu satır aralığı gönderilir (1 tabanlı, kapsayıcı).
+    context_line_range: tuple[int, int] | None = None
 
 
 class ProviderExecution(BaseModel):
