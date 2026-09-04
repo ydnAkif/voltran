@@ -88,7 +88,12 @@ Kabul ölçütü:
 
 ### P1 — Sınırlı council protokolü (FR-08, FR-09)
 
-- Mesaj/tur, toplam süre ve toplam bağlam bütçesi koy.
+Durum: **Kısmi.** FR-08 tur ve bağlam sınırı ile FR-09 yapılandırılmış karar/itiraz
+kaydı `21b74b0`, `2bbe784` ve `e6004f8` commitlerinde uygulandı.
+
+- [x] Mesaj/tur, toplam süre ve toplam bağlam bütçesi koy.
+- [x] Gerçek uzlaşma maddelerini supervisor durum metni yerine açık karar kaydından çıkar.
+- [x] Çözülmeyen ajan itirazlarını nihai sentezde koru.
 - Her ajanın başka bir ajanın katkısını gördüğünü olay kaydından doğrula.
 - Uzlaşma için marker yanında katılımcı ve yanıt zinciri koşulu ara.
 - Eksik sağlayıcı, ajan çökmesi ve kısmi sonucu ayrı durumlar olarak raporla.
@@ -98,6 +103,22 @@ Kabul ölçütü:
 - Sonsuz konuşma mümkün değildir.
 - Tek ajanın kendi kendine uzlaşma ilanı başarısızdır.
 - Kısmi council hiçbir yüzeyde tam başarı görünmez.
+
+### P1 — Yapılandırılmış uzman çıktısı (FR-10, FR-11)
+
+Durum: **Kısmi.** Provider istemi ortak JSON sözleşmesini talep ediyor; düz, fenced ve
+Antigravity stream yanıtları `TaskResult` alanlarına ayrıştırılıyor.
+
+- [x] `summary`, `claims`, `evidence`, `uncertainties`, `risks`, `artifacts` ve `status`
+  alanlarını sağlayıcıdan iste ve doğrula.
+- [x] Şema dışı düz metin için geriye uyumlu fallback'i koru.
+- Kanıt, belirsizlik, risk ve artifact alanlarını Markdown raporuna ekle.
+- Şema uyumsuzluğunu metadata ve benchmark metriği olarak görünür yap.
+
+Kabul ölçütü:
+
+- Üç adaptörün yapılandırılmış ve düz metin yolları sözleşme testlerinden geçer.
+- FR-11 alanları Markdown ve JSON raporlarında kaybolmaz.
 
 ### P1 — İptal, durum sözlüğü ve replay (FR-12, FR-15)
 
