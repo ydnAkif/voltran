@@ -244,23 +244,10 @@ Parolalar, oturum belirteçleri ve API anahtarları model istemlerine veya çal�
 
 ## Yol haritası
 
-- [x] Proje adı ve temel vizyon
-- [x] İlk gereksinimlerin tanımlanması
-- [x] Proje iskeleti ve test altyapısı
-- [x] `voltran doctor` (sistem, sağlayıcı ve `hcom` denetimi)
-- [x] Ortak sağlayıcı adaptör arayüzü
-- [x] Codex, Claude ve Google Antigravity CLI adaptörleri
-- [x] Router ve çalışma modları (`quick`, `expert`, `council`)
-- [x] Canlı çoklu ajan işbirliği motoru (`CollaborationRuntime` + `Supervisor`)
-- [x] Yerel SQLite çalışma geçmişi (`voltran history`)
-- [x] Gizlilik koruması ve veri maskeleme (API key, token, PII)
-- [x] Kör hakemlik (Anonymized peer review — `--blind` ile marka önyargısını önleme)
-- [x] Dosya kilitleme ve sapma denetimi (`FileLockManager` ve `--write` ile çakışma önleme)
-- [x] Görev bazlı değerlendirme seti (`voltran bench`)
-- [x] Paketleme ve tek komutluk macOS kurulumu (`scripts/install.sh`)
-- [x] Canlı Terminal İzleme Paneli (TUI Dashboard — `voltran dashboard`)
-
-Detaylı teknik hedefler, mimari riskler ve gelecek sürümler (v0.2.0 - v0.4.0) için [ROADMAP.md](ROADMAP.md) belgesini inceleyin.
+CLI, sağlayıcı adaptörleri, temel orkestrasyon, yerel geçmiş ve dashboard çalışır durumdadır.
+Council, gizlilik politikası, yazma izolasyonu, benchmark ve yeniden oynatma ise kısmi veya
+planlanmış özelliklerdir. Güncel durum, öncelikler ve ölçülebilir kabul kriterleri için
+[ROADMAP.md](ROADMAP.md) belgesini inceleyin.
 
 
 
@@ -279,4 +266,3 @@ Detaylı teknik hedefler, mimari riskler ve gelecek sürümler (v0.2.0 - v0.4.0)
 ## Durum
 
 Çekirdek orkestrasyon ve canlı çoklu ajan işbirliği mekanizması (`quick`, `expert`, `council` modları, komutan, router, hcom çalışma motoru, gözetmen ve tek sonuç raporlama) tamamlanmıştır. `voltran run`, `voltran history` ve `voltran doctor` komutları yerel olarak test edilebilir durumdadır.
-

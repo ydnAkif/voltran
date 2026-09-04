@@ -1,111 +1,196 @@
-# VOLTRAN Stratejik ve Teknik Yol Haritası (Roadmap)
+# VOLTRAN Yol Haritası
 
-> **Mevcut Sürüm:** `v0.1.0`  
-> **Odak:** Yerel çoklu model orkestrasyonunu deneysel bir prototipten, günlük yazılım geliştirme süreçlerinde güvenle kullanılan endüstriyel bir geliştirici aracına dönüştürmek.
+Son güncelleme: 4 Eylül 2026
+Mevcut sürüm: \`0.1.0\`
 
----
+Bu belge hedef listesinden çok bir uygulama planıdır. Bir madde ancak kodu, otomatik testi,
+hata davranışı ve kullanıcı dokümantasyonu birlikte hazırsa tamamlanmış sayılır.
 
-## 🔍 Gerçekçi Durum Tespiti ve Temel Riskler
+## Durum tanımları
 
-Voltran şu an yerel PTY oturumları üzerinden çalışan, temel uzlaşma ve güvenlik mekanizmalarına sahip işlevsel bir çekirdeğe sahiptir. Ancak projenin tam anlamıyla bir "günlük sürücü" (daily driver) olabilmesi için çözülmesi gereken gerçek teknik engeller şunlardır:
+- **Tamamlandı:** Kullanıcı yüzeyi ve otomatik testleri mevcut.
+- **Kısmi:** Çalışan temel var, ancak ilgili gereksinimin tamamı karşılanmıyor.
+- **Planlandı:** Uygulama henüz yok.
+- **Ertelendi:** Yakın dönem sürüm hedefi değil.
 
-1. **CLI / PTY Kırılganlığı:** Model CLI'larının (Codex, Claude Code, AGY) sürümleri değiştikçe ekran çıktıları, onay pencereleri veya PTY sinyalleri değişebilir. Sistem salt ekran kazımaya (screen scraping) değil, yapılandırılmış IPC kanallarına dayanmalıdır.
-2. **Bağlam ve Jeton (Token) Şişmesi:** 3 model birbirine sürekli yanıt verdikçe transkript karesel (quadratic) olarak büyür. Akıllı bağlam budama ve tur bazlı özetleme şarttır.
-3. **Saatlik Kota ve Oturum Sınırları:** Tüketici abonelikleri (Plus, Pro) agresif saatlik limitlere sahiptir. Sistem, kota dolduğunda oturumu askıya alıp (checkpointing) kota açıldığında kaldığı yerden devam edebilmelidir.
-4. **Çalışma Alanı Güvenliği:** Modeller kod yazarken geliştiricinin kirli (uncommitted) çalışma ağacını ezmemeli; yalıtılmış `git worktree` alanlarında çalışmalıdır.
+## Mevcut durum
 
----
+| Alan | Durum | Mevcut | Eksik |
+| --- | --- | --- | --- |
+| CLI ve paketleme | Tamamlandı | \`doctor\`, \`run\`, \`history\`, \`bench\`, \`dashboard\`, uv paketi ve macOS betiği | Tekrarlanabilir release süreci |
+| Sağlayıcı adaptörleri | Kısmi | Codex, Claude ve Antigravity; timeout ve süreç temizliği | Sürüm uyumluluk matrisi ve gerçek CLI smoke testleri |
+| Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç ve hata raporu | CLI sağlayıcı seçimi ve kullanıcı iptali |
+| Council | Kısmi | hcom oturumu, farklı sağlayıcılar, supervisor ve açık uzlaşma işareti | Tur/bağlam bütçesi, güçlü uzlaşma doğrulaması ve devam |
+| Router | Kısmi | Yetenek, erişilebilirlik ve moda göre basit puanlama | Veri politikası, kota, maliyet, gecikme ve oturum sağlığı |
+| Gizlilik | Kısmi | Sağlayıcıya gönderim ve SQLite öncesi secret/PII maskeleme | Hassasiyet sınıflandırması, veri minimizasyonu ve sağlayıcı izin listesi |
+| Yazma güvenliği | Kısmi | Atomik süreçler arası dosya kilidi; council'da tek yazıcı | Git worktree izolasyonu ve kontrollü diff uygulama |
+| Raporlama | Kısmi | Markdown/JSON, rol, sağlayıcı, durum ve council güven alanları | Kanıtlar ve isteğe bağlı ham uzman çıktıları |
+| Geçmiş | Kısmi | Maskelenmiş SQLite özeti ve son çalışmalar | Replay/resume |
+| Benchmark | Kısmi | Üç sabit senaryo; durum, süre ve uzlaşma kaydı | Altın cevaplar, kalite değerlendirmesi ve karşılaştırmalı ölçüm |
+| Test ve CI | Kısmi | Python 3.11–3.14, macOS/Linux, 67 test, %83 kapsam | Riskli modüllerde hedefli testler ve %90 kapsam |
+| Dashboard | Kısmi | Ajan, olay, kilit ve geçmiş görünümü | Hata dayanıklılığı ve uzun süreli kullanım testi |
 
-## 🗺️ Fazlar ve Sürüm Planı
+## Sıradaki paket: güvenilir 0.1.x
 
-```mermaid
-flowchart TD
-    v1["v0.1.0: Çekirdek & IPC ✅"] --> v2["v0.2.0: Dayanıklılık & Git Worktree"]
-    v2 --> v3["v0.3.0: MCP & Karşıt Doğrulama (TDD)"]
-    v3 --> v4["v0.4.0: Kalıcı Bellek & Arka Plan Servisi"]
-```
+Bu paket bitmeden yeni büyük özellik veya masaüstü arayüzü öncelik değildir.
 
----
+### P0 — Sağlayıcı izin politikası (SEC-02, UR-03)
 
-### 📦 v0.1.0 — Temel Altyapı ve Kararlı Çekirdek (TAMAMLANDI ✅)
-- [x] Resmî CLI adaptörleri (`codex`, `claude`, `agy`)
-- [x] `hcom` PTY tabanlı IPC ve canlı süreç yönetimi
-- [x] Quorum, uzlaşma ve gözetmen döngüsü (`CollaborationSupervisor`)
-- [x] Karpathy esintili kör hakemlik protokolü (`--blind`)
-- [x] Forge esintili hafif dosya kilitleme motoru (`FileLockManager`)
-- [x] Görev bazlı kıyaslama ve değerlendirme paketi (`voltran bench`)
-- [x] Rich tabanlı tam ekran canlı gösterge paneli (`voltran dashboard`)
-- [x] SQLite yerel denetim geçmişi ve veri sanitizasyonu (`voltran history`)
-- [x] Python 3.11 - 3.14 çapraz platform CI matrisi (macOS & Ubuntu)
-- [x] macOS tek komutluk kurulum aracı (`scripts/install.sh`)
+- \`voltran run --provider\` ile tek veya çoklu izin listesi ekle.
+- Politikayı TaskPlan ve Router boyunca taşı.
+- Council için iki farklı izinli ve erişilebilir sağlayıcı yoksa açık degraded/failure üret.
+- Dry-run çıktısında hangi verinin hangi sağlayıcıya gideceğini göster.
 
----
+Kabul ölçütü:
 
-### 🛡️ v0.2.0 — Dayanıklılık, Oturum İyileştirme ve Git İzolasyonu (Sıradaki Adım)
+- İzin verilmeyen sağlayıcı hiçbir yürütme veya hcom komutunda görünmez.
+- Tek, çoklu, geçersiz ve erişilemeyen sağlayıcı senaryoları testlidir.
 
-#### 1. Yalıtılmış Git Çalışma Alanı (`git worktree` İzolasyonu)
-* **Problem:** `--write` izni verildiğinde modeller geliştiricinin üzerinde çalıştığı aktif dosyalarda çakışma yaratabilir.
-* **Çözüm:** Voltran, her görev için geçici bir `git worktree` (`.voltran/worktrees/<run_id>`) açar.
-* Modeller orada çalışır, testler orada koşar. Görev başarıyla onaylandığında ana dala `git merge` veya `git diff` yaması olarak uygulanır.
+### P0 — Hassas veri sınıflandırması (SEC-03)
 
-#### 2. Kota Dondurma ve Askıya Alma (Checkpointing / Resume)
-* Model saatlik limite takıldığında oturumu iptal etmek yerine oturum durumunu SQLite'a dondurur.
-* Kota sıfırlandığında `voltran resume <run_id>` ile tartışma kaldığı yerden devam eder.
+- Finans, sağlık, kimlik, iletişim ve hesap verisi için yerel sınıflandırma üret.
+- Hassas görev otomatik olarak council moduna genişletilmesin.
+- Kullanıcı açıkça council isterse paylaşılacak sağlayıcı ve kapsam önceden gösterilsin.
 
-#### 3. Tek Noktadan Oturum Açma (`voltran login`)
-* Kullanıcının ayrı ayrı CLI komutlarıyla uğraşması yerine, eksik oturumları tespit edip sırayla yetkilendirme ekranlarını açan orkestratör komutu:
-  ```bash
-  voltran login --status
-  voltran login --all
-  ```
+Kabul ölçütü:
 
-#### 4. Otomatik PR İncelemesi (`voltran review`)
-* Mevcut daldaki değişiklikleri (`git diff`) modellerin uzmanlıklarına göre paylaştırır:
-  * **Codex:** Algoritma karmaşıklığı ve kod kalitesi.
-  * **Claude:** Güvenlik açıkları, sınır durumlar (edge-cases) ve yetkilendirme riskleri.
-  * **Antigravity:** Mimari bütünlük ve test kapsamı.
-* Çıktı: GitHub PR'ına doğrudan yapıştırılabilir Markdown inceleme raporu.
+- Hassas örnekler için false-negative odaklı test seti bulunur.
+- Hassas görevde sessiz çoklu-sağlayıcı genişlemesi yapılamaz.
 
----
+### P0 — Veri minimizasyonu (SEC-04)
 
-### ⚙️ v0.3.0 — Ortak Araçlar (MCP) ve Karşıt Doğrulama (Adversarial TDD)
+- \`--file\` içeriğinin tamamı yerine açık boyut sınırı ve bölüm seçimi sağla.
+- Kesilen ve maskelenen veri miktarını dry-run/rapor metadata'sında göster.
+- Binary, aşırı büyük ve okunamayan dosyalar için kontrollü hata üret.
 
-#### 1. MCP (Model Context Protocol) Desteği
-* Üç modele de standartlaştırılmış JSON-RPC protokolüyle yerel araç sağlama:
-  * Dosya okuma/yazma, bash komutu çalıştırma, SQLite/PostgreSQL sorgulama.
-  * Modellerin kendi özel CLI komutlarına bağımlı kalmadan aynı standart araç havuzunu kullanması.
+Kabul ölçütü:
 
-#### 2. Karşıt Test Güdümlü Geliştirme (Adversarial Coding Loop)
-* **Döngü:**
-  1. *Model A (Mimar/Geliştirici):* Fonksiyonu yazar.
-  2. *Model B (Kırıcı/Testçi):* Kodu patlatmayı hedefleyen sınır durum testleri (`pytest`) yazar.
-  3. Kod testleri geçene kadar modeller kendi aralarında düzeltme turlarına girer (azami 3 tur).
-* Bu yaklaşım halüsinasyon riskini neredeyse sıfıra indirir.
+- Büyük dosya sağlayıcı stdin bütçesini aşamaz.
+- Gönderilen kapsam otomatik testte doğrulanabilir.
 
-#### 3. Transkript ve Jeton Optimizasyonu (Smart Context Compactor)
-* Tartışma turları uzadığında ara mesajları sıkıştıran ve sadece kritik itiraz/mutabakat noktalarını sonraki tura aktaran dinamik bağlam sıkıştırıcı.
+### P0 — Git worktree yazma izolasyonu (SEC-07)
 
----
+- \`--write\` görevlerini aktif checkout yerine görev bazlı geçici worktree'de çalıştır.
+- Kirli çalışma ağacı ve başlangıç ref'i davranışını tanımla.
+- Görev sonunda diff ve test sonucu üret; ana çalışma ağacına otomatik uygulama yapma.
+- Cleanup başarısızsa worktree yolunu koruyup kullanıcıya bildir.
 
-### 🧠 v0.4.0 — Kalıcı Proje Belleği ve Arka Plan Servisi
+Kabul ölçütü:
 
-#### 1. Proje Düzeyinde Kalıcı Bellek (`.voltran/memory/`)
-* Projenin kodlama standartlarını, kullanılan kütüphaneleri ve geçmiş kararları vektör veya yapılandırılmış JSON formatında saklama.
-* Modellerin her çalıştırmada projeyi sıfırdan analiz etmek yerine önceki oturumların birikiminden faydalanması.
+- Aktif çalışma ağacı görev sırasında değişmez.
+- Success, failure, timeout ve cancel yaşam döngüleri testlidir.
+- Kullanıcı incelemeden merge, cherry-pick veya patch uygulanmaz.
 
-#### 2. macOS Status Bar / Menü Çubuğu Ajanı
-* Terminal dışında çalışmak isteyenler için:
-  * Menü çubuğunda anlık model kota durumu (yeşil/kırmızı gösterge).
-  * Kısayol tuşuyla (`Cmd + Shift + V`) hızlı soru sorma ve konsey çağırma kutusu.
-  * Konsey uzlaşmaya vardığında macOS yerel bildirimi.
+## Sonraki paket: council doğruluğu ve dayanıklılığı
 
----
+### P1 — Sınırlı council protokolü (FR-08, FR-09)
 
-## 📈 Metrikler ve Başarı Kriterleri
+- Mesaj/tur, toplam süre ve toplam bağlam bütçesi koy.
+- Her ajanın başka bir ajanın katkısını gördüğünü olay kaydından doğrula.
+- Uzlaşma için marker yanında katılımcı ve yanıt zinciri koşulu ara.
+- Eksik sağlayıcı, ajan çökmesi ve kısmi sonucu ayrı durumlar olarak raporla.
 
-| Metrik | Hedef | Ölçüm Yöntemi |
-| :--- | :--- | :--- |
-| **Uzlaşma Başarısı** | > %85 | Konsey oturumlarının `VOLTRAN_CONSENSUS` ile sonuçlanma oranı |
-| **Halüsinasyon Azaltma** | Tek modele kıyasla < %5 | Karşıt doğrulama testlerinin tespit ettiği mantık hatası oranı |
-| **Ortalama Konsey Süresi** | < 45 saniye | 3 modelli istişarelerin tamamlanma süresi |
-| **Test Kapsamı** | > %90 | Pytest kod satırı kapsama oranı |
+Kabul ölçütü:
+
+- Sonsuz konuşma mümkün değildir.
+- Tek ajanın kendi kendine uzlaşma ilanı başarısızdır.
+- Kısmi council hiçbir yüzeyde tam başarı görünmez.
+
+### P1 — İptal, durum sözlüğü ve replay (FR-12, FR-15)
+
+- Ctrl-C sırasında provider ve hcom süreçlerini deterministik kapat.
+- Durumları tek sözlükte birleştir: success, partial, failed, timed_out, cancelled.
+- \`voltran replay <run_id>\` ile kaydedilmiş plan/politikayı yeniden kur.
+- Resume yalnızca güvenilir oturum devam kimliği kanıtlanırsa eklenir.
+
+Kabul ölçütü:
+
+- İptal sonrası artık süreç kalmaz.
+- Benchmark, history, JSON ve Markdown aynı çalışma için çelişmez.
+- Replay gizli istem içeriğini geri yüklemez.
+
+### P1 — Bağlam bütçesi
+
+- Önce sabit ve ölçülebilir karakter/token bütçesi uygula.
+- Sıkıştırmada kaynak olay kimlikleri ve kritik anlaşmazlıkları koru.
+- Ham ve sıkıştırılmış transkript boyutlarını ölç.
+
+Kabul ölçütü:
+
+- Uzun oturum tanımlı üst sınırı aşmaz.
+- Kritik hata ve anlaşmazlıklar sıkıştırmada kaybolmaz.
+
+## 0.2 giriş kapısı: kalite
+
+### P1 — Risk tabanlı test kapsamı
+
+Öncelik: \`hcom_client\`, \`lock\`, \`providers/cli\`, \`router\`, \`reporter\`.
+
+- CI kapsam alt sınırını mevcut %80'den önce %85'e, sonra %90'a çıkar.
+- Satır kapsamına ek olarak timeout, yarış, bozuk çıktı ve cleanup dallarını test et.
+- Gerçek model kotası CI'da tüketilmesin.
+
+Kabul ölçütü:
+
+- Toplam kapsam en az %90.
+- Riskli modüllerin her biri en az %85.
+- Ruff, Pyright strict ve tüm testler yeşil.
+
+### P1 — Gerçek CLI uyumluluğu
+
+- Desteklenen CLI sürümlerini belgeleyip fixture tabanlı sözleşme testleri ekle.
+- Manuel veya nightly akışta gerçek version/help ve kısa smoke test çalıştır.
+- Bilinmeyen sürümü sessizce hazır kabul etme.
+
+## Daha sonra: gerçek benchmark
+
+### P2 — Ölçülebilir değerlendirme
+
+- Senaryoları sürümlü fixture dosyalarına taşı.
+- Her görev için doğrulanabilir beklenen özellik veya test komutu tanımla.
+- Quick/expert/council sonuçlarını aynı görev üzerinde karşılaştır.
+- Çalıştırma başarısı ile cevap kalitesini ayrı metrikler olarak tut.
+- En az 20 tekrar olmadan yüzde bazlı ürün iddiası yayımlama.
+
+Kabul ölçütü:
+
+- Veri seti, örneklem sayısı ve değerlendirme yöntemi raporda bulunur.
+- Uzlaşma yalnızca açıkça doğrulanmış council sonucu için sayılır.
+- Ölçülmemiş halüsinasyon azaltma iddiası yapılmaz.
+
+## Ertelenen işler
+
+- MCP tabanlı ortak araç katmanı.
+- Kalıcı proje belleği veya vektör veritabanı.
+- Kota dolunca otomatik checkpoint/resume.
+- Menü çubuğu veya SwiftUI uygulaması.
+- Otomatik GitHub PR yazma/gönderme.
+- Gelişmiş yapılandırma katmanları ve yeni dağıtım kanalları.
+
+Bunlar çekirdek güvenlik ve doğruluk sorunlarını çözmediği için yakın dönem taahhüdü değildir.
+
+## Sürüm çıkış ölçütleri
+
+### 0.1.x güvenilirlik sürümü
+
+- Tüm P0 maddeleri tamamlanmış.
+- Kalite kapıları yeşil.
+- Dokümantasyonda kısmi özellikler tamamlanmış gösterilmiyor.
+
+### 0.2.0
+
+- P1 council, iptal, replay ve kalite maddeleri tamamlanmış.
+- En az üç gerçek uçtan uca görevde hata ve cleanup doğrulanmış.
+- Bilinen kritik veya yüksek öncelikli hata yok.
+
+## Her değişiklikte çalıştırılacak kapılar
+
+\`\`\`bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest --cov=voltran --cov-report=term-missing --cov-fail-under=80
+\`\`\`
+
+Coverage alt sınırı gerçek ölçüm yükseldikçe artırılmalı; ölçüm artmadan hedef rakam
+değiştirilmemelidir.
