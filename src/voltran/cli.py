@@ -13,8 +13,8 @@ from rich.console import Console
 from rich.table import Table
 
 from voltran import __version__
+from voltran.config import ConfigError, VoltranConfig, load_config, user_config_path
 from voltran.context import (
-    DEFAULT_MAX_CONTEXT_CHARS,
     ContextError,
     ContextScope,
     load_context,
@@ -179,13 +179,16 @@ def run(
         typer.Option("--output", "-o", help="Nihai Markdown raporunu dosyaya kaydet."),
     ] = None,
     timeout: Annotated[
-        float,
+        float | None,
         typer.Option(help="Model çalıştırmaları için saniye cinsinden zaman aşımı."),
-    ] = 300.0,
+    ] = None,
     blind: Annotated[
-        bool,
-        typer.Option("--blind", help="Kör hakemlik: Modellerin marka ve firma kimliklerini gizle."),
-    ] = False,
+        bool | None,
+        typer.Option(
+            "--blind/--no-blind",
+            help="Kör hakemlik: Modellerin marka ve firma kimliklerini gizle.",
+        ),
+    ] = None,
     allow_writes: Annotated[
         bool,
         typer.Option(
@@ -209,14 +212,14 @@ def run(
         ),
     ] = None,
     max_context: Annotated[
-        int,
+        int | None,
         typer.Option(
             "--max-context",
             min=100,
             max=2_000_000,
             help="Bağlam dosyasından sağlayıcıya gönderilecek azami karakter sayısı.",
         ),
-    ] = DEFAULT_MAX_CONTEXT_CHARS,
+    ] = None,
     lines: Annotated[
         str | None,
         typer.Option(
@@ -235,9 +238,34 @@ def run(
     from voltran.router import Router
     from voltran.store import RunStore
 
+    # FR-13: komut satırı > proje (voltran.toml) > kullanıcı > güvenli varsayılan.
+    try:
+        settings = load_config(
+            cli={
+                "mode": mode.value if mode is not None else None,
+                "timeout": timeout,
+                "providers": _split_provider_options(providers) or None,
+                "max_context": max_context,
+                "blind": blind,
+            }
+        )
+    except ConfigError as exc:
+        console.print(f"[red]Yapılandırma hatası:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    try:
+        resolved_mode = ExecutionMode(settings.mode) if settings.mode is not None else None
+    except ValueError as exc:
+        valid = ", ".join(member.value for member in ExecutionMode)
+        console.print(
+            f"[red]Geçersiz mod:[/red] '{settings.mode}' "
+            f"({settings.source_of('mode')}). Geçerli değerler: {valid}."
+        )
+        raise typer.Exit(code=2) from exc
+
     router = Router()
     try:
-        allowed = router.validate_provider_keys(_split_provider_options(providers))
+        allowed = router.validate_provider_keys(settings.providers)
     except ValueError as exc:
         console.print(f"[red]Sağlayıcı seçimi hatası:[/red] {exc}")
         raise typer.Exit(code=2) from exc
@@ -249,7 +277,7 @@ def run(
     if file is not None:
         try:
             line_range = parse_line_range(lines) if lines else None
-            scope = load_context(file, max_chars=max_context, line_range=line_range)
+            scope = load_context(file, max_chars=settings.max_context, line_range=line_range)
         except ContextError as exc:
             console.print(f"[red]Bağlam dosyası hatası:[/red] {exc}")
             raise typer.Exit(code=2) from exc
@@ -260,14 +288,14 @@ def run(
     commander = Commander()
     plan = commander.create_plan(
         prompt,
-        mode=mode,
+        mode=resolved_mode,
         context_file=file,
         context_text=context_text,
     )
-    plan.policy.timeout_seconds = timeout
-    plan.policy.blind_mode = blind
+    plan.policy.timeout_seconds = settings.timeout
+    plan.policy.blind_mode = settings.blind
     plan.policy.allow_writes = allow_writes
-    plan.policy.max_context_chars = max_context
+    plan.policy.max_context_chars = settings.max_context
     plan.policy.context_line_range = line_range
 
     try:
@@ -284,7 +312,7 @@ def run(
         console.print(f"  [dim]Bulgular: {sensitivity.summary()}[/dim]")
         targets = sorted({st.assigned_provider or "-" for st in plan.subtasks})
         console.print(f"  [dim]Bu görev şu sağlayıcılara gidecek: {', '.join(targets)}[/dim]")
-        if mode is None and plan.mode is not ExecutionMode.COUNCIL:
+        if resolved_mode is None and plan.mode is not ExecutionMode.COUNCIL:
             console.print("  [dim]Konsey moduna otomatik genişletme yapılmadı.[/dim]")
         console.print()
 
@@ -336,6 +364,69 @@ def run(
     if output is not None:
         output.write_text(Reporter.to_markdown(report), encoding="utf-8")
         console.print(f"\n[green]Rapor kaydedildi:[/green] {output}")
+
+
+def _config_rows(settings: VoltranConfig) -> list[tuple[str, str, str]]:
+    """Yürürlükteki her ayarı ve geldiği katmanı satırlara çevirir."""
+
+    values: dict[str, object] = {
+        "mode": settings.mode if settings.mode is not None else "(otomatik seçilir)",
+        "timeout": settings.timeout,
+        "providers": ", ".join(settings.providers) if settings.providers else "(kısıt yok)",
+        "max_context": settings.max_context,
+        "blind": "evet" if settings.blind else "hayır",
+    }
+    return [(key, str(value), settings.source_of(key)) for key, value in values.items()]
+
+
+@app.command()
+def config(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Makinece okunabilir JSON çıktı üret."),
+    ] = False,
+) -> None:
+    """Yürürlükteki yapılandırmayı ve her ayarın hangi katmandan geldiğini göster."""
+
+    try:
+        settings = load_config()
+    except ConfigError as exc:
+        console.print(f"[red]Yapılandırma hatası:[/red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    rows = _config_rows(settings)
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "settings": {key: value for key, value, _ in rows},
+                    "provenance": {key: source for key, _, source in rows},
+                    "sources": [str(path) for path in settings.sources],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+
+    table = Table(title="VOLTRAN yürürlükteki yapılandırma", show_lines=False)
+    table.add_column("Ayar", no_wrap=True)
+    table.add_column("Değer")
+    table.add_column("Kaynak", style="dim")
+    for key, value, source in rows:
+        table.add_row(key, value, source)
+    console.print(table)
+
+    console.print(
+        "\n[dim]Öncelik: komut satırı > proje (voltran.toml) > kullanıcı > varsayılan.[/dim]"
+    )
+    if settings.sources:
+        for path in settings.sources:
+            console.print(f"[dim]Okunan dosya: {path}[/dim]")
+    else:
+        console.print("[dim]Hiçbir yapılandırma dosyası bulunamadı; varsayılanlar geçerli.[/dim]")
+        console.print(f"[dim]Kullanıcı dosyası şuraya konabilir: {user_config_path()}[/dim]")
+    console.print("[dim]Yazma izni (--write) güvenlik gereği yapılandırılamaz.[/dim]")
 
 
 @app.command()

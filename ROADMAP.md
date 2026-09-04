@@ -17,7 +17,7 @@ hata davranışı ve kullanıcı dokümantasyonu birlikte hazırsa tamamlanmış
 
 | Alan | Durum | Mevcut | Eksik |
 | --- | --- | --- | --- |
-| CLI ve paketleme | Tamamlandı | \`doctor\`, \`run\`, \`history\`, \`bench\`, \`dashboard\`, uv paketi ve macOS betiği | Tekrarlanabilir release süreci |
+| CLI ve paketleme | Tamamlandı | \`doctor\`, \`run\`, \`history\`, \`bench\`, \`dashboard\`, \`unlock\`, \`config\` (katmanlı yapılandırma, FR-13), uv paketi ve macOS betiği | Tekrarlanabilir release süreci |
 | Sağlayıcı adaptörleri | Kısmi | Codex, Claude ve Antigravity; timeout ve süreç temizliği | Sürüm uyumluluk matrisi ve gerçek CLI smoke testleri |
 | Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç, hata raporu ve `--provider` izin listesi | Kullanıcı iptali (`voltran cancel`) ve paralel alt görev yürütme |
 | Council | Kısmi | hcom oturumu, farklı sağlayıcılar, supervisor, açık uzlaşma işareti, izin listesine uyum ve "en az iki sağlayıcı" şartı | Tur/bağlam bütçesi, güçlü uzlaşma doğrulaması ve devam |
@@ -70,6 +70,21 @@ Kabul ölçütü: karşılandı. \`tests/test_classifier.py\` false-negative oda
 Kabul ölçütü: karşılandı. \`tests/test_context.py\` birden çok bütçe için
 \`len(text) <= max_chars\` bağıntısını (kırpma işareti dâhil) doğrular;
 \`tests/test_engine.py\` ise casus adaptörle sağlayıcıya ulaşan bağlamı ölçer.
+
+### P0 — Katmanlı yapılandırma (FR-13) — **Tamamlandı**
+
+- [x] Öncelik sırası: komut satırı > proje (`voltran.toml`) > kullanıcı > güvenli varsayılan.
+- [x] Proje dosyası depo kökünde durur ve alt dizinlerden yukarı doğru aranır; `.voltran/`
+      `.gitignore` içinde olduğu için yapılandırma oraya konmaz, ekiple paylaşılabilir kalır.
+- [x] Bilinmeyen anahtar ve yanlış tür sessizce yok sayılmaz, `ConfigError` üretir.
+- [x] `voltran config` yürürlükteki her ayarı ve **hangi katmandan geldiğini** gösterir
+      (`--json` ile makinece okunabilir).
+- [x] `--write` bilinçli olarak yapılandırılamaz; dosya değiştirme yetkisi her çalıştırmada
+      açıkça verilmelidir, aksi hâlde "güvenli varsayılan" ilkesi anlamını yitirir.
+
+Kabul ölçütü: karşılandı. `tests/test_config.py` katman önceliğini, keşif yürüyüşünü,
+tür doğrulamasını ve yazma izninin yapılandırılamazlığını; `tests/test_cli.py` ise
+`voltran config` çıktısını ve `run` üzerindeki etkisini doğrular.
 
 ### P0 — Git worktree yazma izolasyonu (SEC-07)
 

@@ -25,6 +25,7 @@
   - [Canlı Terminal Paneli (`voltran dashboard`)](#️-canlı-terminal-gösterge-paneli-voltran-dashboard)
   - [Model Kıyaslama (`voltran bench`)](#-görev-bazlı-kıyaslama-ve-değerlendirme-voltran-bench)
   - [Geçmiş Kayıtları (`voltran history`)](#-çalışma-geçmişi-voltran-history)
+  - [Katmanlı Yapılandırma (`voltran config`)](#️-katmanlı-yapılandırma-voltran-config)
 - [Tasarım İlkeleri ve Güvenlik](#tasarım-ilkeleri)
 - [Yol Haritası](#yol-haritası)
 
@@ -235,12 +236,48 @@ Yerel SQLite veritabanındaki son çalışmaları listeler:
 uv run voltran history
 ```
 
+### ⚙️ Katmanlı Yapılandırma (`voltran config`)
+Ayarlar dört katmandan, şu öncelikle birleştirilir: **komut satırı > proje > kullanıcı > güvenli varsayılan.**
+
+```bash
+# Yürürlükteki ayarları ve her birinin hangi katmandan geldiğini göster:
+uv run voltran config
+uv run voltran config --json
+```
+
+Proje ayarları depo kökündeki `voltran.toml` dosyasından okunur (alt dizinlerden yukarı doğru aranır);
+kullanıcı ayarları `$XDG_CONFIG_HOME/voltran/config.toml` (veya `$VOLTRAN_CONFIG_DIR/config.toml`) yolundadır.
+
+```toml
+# voltran.toml — ekiple paylaşılabilir proje ayarları
+mode = "expert"
+timeout = 120
+providers = ["claude", "codex"]
+max_context = 15000
+blind = false
+```
+
+```
+┏━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━┓
+┃ Ayar        ┃ Değer         ┃ Kaynak ┃
+┡━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━┩
+│ mode        │ expert        │ proje  │
+│ timeout     │ 120.0         │ proje  │
+│ providers   │ claude, codex │ proje  │
+│ max_context │ 40000         │ varsayılan │
+└─────────────┴───────────────┴────────┘
+```
+
+> **Yazma izni yapılandırılamaz.** `--write` bilinçli olarak `voltran.toml` üzerinden açılamaz;
+> dosya değiştirme yetkisi her çalıştırmada açıkça verilmesi gereken bir karardır. Bilinmeyen
+> anahtar veya yanlış tür de sessizce yok sayılmaz, hata verir — yazım hatası olan bir ayarın
+> uygulandığını sanmayasınız diye.
+
 ### 🔜 Geliştirilmekte Olan Komutlar
 ```bash
 voltran login codex
 voltran login claude
 voltran login google
-voltran config
 ```
 
 ## Geliştirme ve Test

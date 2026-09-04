@@ -253,3 +253,76 @@ def test_dry_run_reports_context_minimisation(monkeypatch: MonkeyPatch, tmp_path
     assert result.exit_code == 0
     assert "Veri minimizasyonu" in result.stdout
     assert "gönderilmeyecek" in result.stdout
+
+
+def test_config_command_shows_defaults(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_CONFIG_DIR", str(tmp_path / "yok"))
+
+    result = runner.invoke(app, ["config"])
+
+    assert result.exit_code == 0
+    assert "varsayılan" in result.stdout
+    assert "Hiçbir yapılandırma dosyası bulunamadı" in result.stdout
+    assert "yapılandırılamaz" in result.stdout
+
+
+def test_config_command_reports_project_layer(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_CONFIG_DIR", str(tmp_path / "yok"))
+    (tmp_path / "voltran.toml").write_text('mode = "quick"\ntimeout = 12\n', encoding="utf-8")
+
+    result = runner.invoke(app, ["config", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["settings"]["mode"] == "quick"
+    assert payload["provenance"]["mode"] == "proje"
+    assert payload["provenance"]["max_context"] == "varsayılan"
+    assert payload["sources"] == [str(tmp_path / "voltran.toml")]
+
+
+def test_run_uses_project_config_and_cli_wins(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_CONFIG_DIR", str(tmp_path / "yok"))
+    (tmp_path / "voltran.toml").write_text(
+        'mode = "council"\nproviders = ["codex", "google"]\nblind = true\n',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["run", "bir görev", "--dry-run", "--explain"])
+    assert result.exit_code == 0
+    assert "COUNCIL" in result.stdout
+    assert "codex, google" in result.stdout
+    assert "Kör Hakemlik" in result.stdout
+
+    # Komut satırı proje dosyasını ezer.
+    overridden = runner.invoke(
+        app, ["run", "bir görev", "--mode", "quick", "--no-blind", "--dry-run", "--explain"]
+    )
+    assert overridden.exit_code == 0
+    assert "QUICK" in overridden.stdout
+    assert "Kör Hakemlik" not in overridden.stdout
+
+
+def test_run_rejects_invalid_mode_from_config(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_CONFIG_DIR", str(tmp_path / "yok"))
+    (tmp_path / "voltran.toml").write_text('mode = "konsey"\n', encoding="utf-8")
+
+    result = runner.invoke(app, ["run", "bir görev", "--dry-run"])
+
+    assert result.exit_code == 2
+    assert "Geçersiz mod" in result.stdout
+    assert "proje" in result.stdout
+
+
+def test_run_reports_broken_config_file(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("VOLTRAN_CONFIG_DIR", str(tmp_path / "yok"))
+    (tmp_path / "voltran.toml").write_text("timeout = [bozuk\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["run", "bir görev", "--dry-run"])
+
+    assert result.exit_code == 2
+    assert "Yapılandırma hatası" in result.stdout
