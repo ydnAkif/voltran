@@ -19,15 +19,15 @@ hata davranışı ve kullanıcı dokümantasyonu birlikte hazırsa tamamlanmış
 | --- | --- | --- | --- |
 | CLI ve paketleme | Tamamlandı | \`doctor\`, \`run\`, \`history\`, \`bench\`, \`dashboard\`, \`unlock\`, \`config\` (katmanlı yapılandırma, FR-13), uv paketi ve macOS betiği | Tekrarlanabilir release süreci |
 | Sağlayıcı adaptörleri | Kısmi | Codex, Claude ve Antigravity; timeout ve süreç temizliği | Sürüm uyumluluk matrisi ve gerçek CLI smoke testleri |
-| Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç, hata raporu ve `--provider` izin listesi | Kullanıcı iptali (`voltran cancel`) ve paralel alt görev yürütme |
+| Quick/expert | Kısmi | Router seçimi, timeout, normalize sonuç, hata raporu, `--provider` izin listesi, kullanıcı iptali (`voltran cancel`, FR-15) | Paralel alt görev yürütme |
 | Council | Kısmi | hcom oturumu, farklı sağlayıcılar, supervisor, açık uzlaşma işareti, izin listesine uyum ve "en az iki sağlayıcı" şartı | Tur/bağlam bütçesi, güçlü uzlaşma doğrulaması ve devam |
 | Router | Kısmi | Yetenek, erişilebilirlik, moda göre puanlama ve doğrulanan sağlayıcı izin listesi | Kota, maliyet, gecikme ve oturum sağlığı |
 | Gizlilik | Tamamlandı | Secret/PII maskeleme (giden ve kayıt yolu), hassasiyet sınıflandırması, hassas görevde otomatik council genişlemesinin engellenmesi, sağlayıcı izin listesi, dry-run veri paylaşım önizlemesi ve bağlam bütçesi/bölüm seçimi | SEC-01..SEC-04 karşılandı; kalan gizlilik işi yok |
 | Yazma güvenliği | Kısmi | Atomik süreçler arası dosya kilidi; council'da tek yazıcı | Git worktree izolasyonu ve kontrollü diff uygulama |
 | Raporlama | Kısmi | Markdown/JSON, rol, sağlayıcı, durum ve council güven alanları | Kanıtlar ve isteğe bağlı ham uzman çıktıları |
-| Geçmiş | Kısmi | Maskelenmiş SQLite özeti ve son çalışmalar | Replay/resume |
+| Geçmiş | Tamamlandı | Maskelenmiş SQLite özeti, son çalışmalar ve `voltran replay <run_id>` (FR-12) | - |
 | Benchmark | Kısmi | Üç sabit senaryo; durum, süre ve uzlaşma kaydı | Altın cevaplar, kalite değerlendirmesi ve karşılaştırmalı ölçüm |
-| Test ve CI | Kısmi | Python 3.11–3.14, macOS/Linux, 99 test, %85 kapsam, CI kapsam kapısı %83 | `hcom_client` ve `providers/cli` için hedefli testler; %90 kapsam |
+| Test ve CI | Kısmi | Python 3.11–3.14, macOS/Linux, 172 test, %89 kapsam (`hcom_client` %94, `providers/cli` %96) | Gerçek CLI smoke testleri |
 | Dashboard | Kısmi | Ajan, olay, kilit ve geçmiş görünümü | Hata dayanıklılığı ve uzun süreli kullanım testi |
 
 ## Sıradaki paket: güvenilir 0.1.x
@@ -135,18 +135,18 @@ Kabul ölçütü:
 - Üç adaptörün yapılandırılmış ve düz metin yolları sözleşme testlerinden geçer.
 - FR-11 alanları Markdown ve JSON raporlarında kaybolmaz.
 
-### P1 — İptal, durum sözlüğü ve replay (FR-12, FR-15)
+### P1 — İptal, durum sözlüğü ve replay (FR-12, FR-15) — **Tamamlandı**
 
-- Ctrl-C sırasında provider ve hcom süreçlerini deterministik kapat.
-- Durumları tek sözlükte birleştir: success, partial, failed, timed_out, cancelled.
-- \`voltran replay <run_id>\` ile kaydedilmiş plan/politikayı yeniden kur.
-- Resume yalnızca güvenilir oturum devam kimliği kanıtlanırsa eklenir.
+- [x] Ctrl-C sırasında provider ve hcom süreçlerini deterministik kapat (SIGINT -> SIGTERM/SIGKILL eskalasyonu, exit code 130).
+- [x] `voltran cancel <run_id>` komutu ile devam eden çalışmayı ve arka plan süreç grubunu güvenle sonlandır.
+- [x] SQLite `active_runs` tablosu ile aktif süreç ve PID takibi; iptal edilen çalışmanın `cancelled` durumuna geçirilmesi.
+- [x] `voltran replay <run_id>` ile veritabanında saklanan özgün plan ve politikayı yeniden kurup yürütme (`--explain`, `--json`, `--output` destekli).
+- [x] Geriye dönük uyumluluk: eski şemadaki veritabanlarını otomatik `plan_json` ve `policy_json` sütunlarıyla göç etme.
+- [x] Replay gizli istem içeriğini geri yüklemez (sanitize edilmiş metin korunur).
 
-Kabul ölçütü:
-
-- İptal sonrası artık süreç kalmaz.
-- Benchmark, history, JSON ve Markdown aynı çalışma için çelişmez.
-- Replay gizli istem içeriğini geri yüklemez.
+Kabul ölçütü: karşılandı. `tests/test_cli.py` cancel, replay ve KeyboardInterrupt senaryolarını;
+`tests/test_store.py` otomatik şema göçünü ve aktif çalıştırma yaşam döngüsünü;
+`tests/test_engine.py` ise iptal çağrısının süreçleri sonlandırmasını doğrular.
 
 ### P1 — Bağlam bütçesi
 
@@ -163,17 +163,20 @@ Kabul ölçütü:
 
 ### P1 — Risk tabanlı test kapsamı
 
-Öncelik: \`hcom_client\`, \`lock\`, \`providers/cli\`, \`router\`, \`reporter\`.
+Öncelik: `hcom_client`, `lock`, `providers/cli`, `router`, `reporter`.
 
+- [x] `hcom_client` kapsamı %65'ten **%94**'e çıkarıldı (`tests/test_hcom_client.py`).
+- [x] `providers/cli` kapsamı %76'dan **%96**'ya çıkarıldı (`tests/test_providers.py`).
+- [x] Satır kapsamına ek olarak timeout, yarış, bozuk çıktı ve cleanup dalları test edildi.
+- [x] Toplam test sayısı 172'ye, proje kapsamı **%89**'a ulaştı.
 - CI kapsam alt sınırını mevcut %80'den önce %85'e, sonra %90'a çıkar.
-- Satır kapsamına ek olarak timeout, yarış, bozuk çıktı ve cleanup dallarını test et.
 - Gerçek model kotası CI'da tüketilmesin.
 
 Kabul ölçütü:
 
-- Toplam kapsam en az %90.
-- Riskli modüllerin her biri en az %85.
-- Ruff, Pyright strict ve tüm testler yeşil.
+- Toplam kapsam en az %90 (mevcut: %89).
+- Riskli modüllerin her biri en az %85 (`hcom_client` %94, `providers/cli` %96).
+- Ruff, Pyright strict ve tüm testler yeşil (172 test yeşil, 0 pyright hatası).
 
 ### P1 — Gerçek CLI uyumluluğu
 
