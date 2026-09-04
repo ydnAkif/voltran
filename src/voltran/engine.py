@@ -19,6 +19,7 @@ from voltran.models import (
     TaskResult,
 )
 from voltran.providers import ProviderAdapter, default_registry
+from voltran.sanitizer import sanitize_text
 from voltran.supervisor import (
     CollaborationSupervisor,
     SupervisionStatus,
@@ -57,6 +58,11 @@ class ExecutionEngine:
             except OSError as exc:
                 context = f"[Bağlam dosyası okunamadı: {exc}]"
 
+        # Gizli değerler sağlayıcı süreçlerine ulaşmadan önce maskelenir.
+        provider_prompt = sanitize_text(prompt)
+        if context is not None:
+            context = sanitize_text(context)
+
         if dry_run:
             executions: list[ProviderExecution] = []
             for st in plan.subtasks:
@@ -94,10 +100,12 @@ class ExecutionEngine:
 
         match plan.mode:
             case ExecutionMode.COUNCIL:
-                report = await self._execute_council(run_id, prompt, plan, context, started)
+                report = await self._execute_council(
+                    run_id, prompt, provider_prompt, plan, context, started
+                )
             case _:
                 report = await self._execute_single_or_expert(
-                    run_id, prompt, plan, context, started
+                    run_id, prompt, provider_prompt, plan, context, started
                 )
 
         return report
@@ -106,6 +114,7 @@ class ExecutionEngine:
         self,
         run_id: str,
         prompt: str,
+        provider_prompt: str,
         plan: TaskPlan,
         context: str | None,
         started: float,
@@ -131,7 +140,7 @@ class ExecutionEngine:
 
             task = ProviderTask(
                 task_id=st.subtask_id,
-                prompt=prompt,
+                prompt=provider_prompt,
                 role=st.role,
                 purpose=st.purpose,
                 model=st.model,
@@ -165,6 +174,7 @@ class ExecutionEngine:
         self,
         run_id: str,
         prompt: str,
+        provider_prompt: str,
         plan: TaskPlan,
         context: str | None,
         started: float,
@@ -199,7 +209,7 @@ class ExecutionEngine:
             if not plan.policy.allow_writes
             else "Yalnızca verilen görev kapsamındaki dosyalarda değişiklik yap."
         )
-        session_prompt = prompt
+        session_prompt = provider_prompt
         if context:
             session_prompt += f"\n\nBAĞLAM:\n{context[: plan.policy.max_output_chars]}"
 
@@ -296,7 +306,7 @@ class ExecutionEngine:
                 execution.status is ExecutionStatus.SUCCESS for execution in executions
             )
             synthesis = CouncilSynthesis(
-                consensus=[outcome.reason] if outcome.status is SupervisionStatus.COMPLETED else [],
+                consensus=[outcome.reason] if outcome.consensus_reached else [],
                 disagreements=(
                     []
                     if outcome.consensus_reached

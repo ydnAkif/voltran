@@ -6,6 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 import typer
 from rich.console import Console
@@ -180,15 +181,21 @@ def run(
         console.print()
 
     lock_mgr = FileLockManager()
-    if file and allow_writes:
-        lock_mgr.acquire(file, "voltran-orchestrator")
+    lock_holder = f"voltran-orchestrator-{uuid4().hex}"
+    if file and allow_writes and not lock_mgr.acquire(file, lock_holder):
+        current_holder = lock_mgr.get_holder(file) or "bilinmeyen süreç"
+        console.print(
+            f"[red]Dosya kilidi alınamadı:[/red] {file} "
+            f"([yellow]{current_holder}[/yellow] tarafından kullanılıyor)"
+        )
+        raise typer.Exit(code=1)
 
     try:
         engine = ExecutionEngine()
         report = asyncio.run(engine.execute_plan(prompt, plan, dry_run=dry_run))
     finally:
         if file and allow_writes:
-            lock_mgr.release(file, "voltran-orchestrator")
+            lock_mgr.release(file, lock_holder)
 
     if not dry_run:
         RunStore().save_report(report)

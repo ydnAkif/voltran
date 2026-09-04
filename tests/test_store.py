@@ -67,3 +67,34 @@ def test_store_redacts_secrets_and_pii_in_sqlite(tmp_path: Path) -> None:
     assert "user@example.com" not in history[0].prompt_preview
     assert "[REDACTED_API_KEY]" in history[0].prompt_preview
     assert "[REDACTED_EMAIL]" in history[0].prompt_preview
+
+
+def test_store_marks_partial_failure_as_failed(tmp_path: Path) -> None:
+    store = RunStore(tmp_path / "partial.db")
+    plan = TaskPlan(mode=ExecutionMode.COUNCIL, reasoning="test")
+    report = ExecutionReport(
+        task_prompt="Konsey görevi",
+        mode=ExecutionMode.COUNCIL,
+        plan=plan,
+        executions=[
+            ProviderExecution(
+                run_id="ok",
+                provider="claude",
+                status=ExecutionStatus.SUCCESS,
+                duration_ms=1,
+                result=TaskResult(summary="ok", status="success"),
+            ),
+            ProviderExecution(
+                run_id="failed",
+                provider="codex",
+                status=ExecutionStatus.FAILED,
+                duration_ms=1,
+                error="boom",
+            ),
+        ],
+        final_summary="Kısmi sonuç",
+    )
+
+    store.save_report(report)
+
+    assert store.list_recent()[0].status == "failed"

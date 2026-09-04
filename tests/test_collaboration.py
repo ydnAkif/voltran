@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -172,6 +173,7 @@ def test_collaboration_runtime_session_lifecycle(tmp_path: Path) -> None:
             task_prompt="Sistem mimarisini incele",
             roles=roles,
             working_dir=tmp_path,
+            allow_writes=True,
         )
 
         assert session.is_active is True
@@ -189,6 +191,21 @@ def test_collaboration_runtime_session_lifecycle(tmp_path: Path) -> None:
         assert call_kwargs["tag"] == "mimar"
         assert "Yazılım Mimarı" in call_kwargs["system_prompt"]
         assert "Tasarım analizi" in call_kwargs["system_prompt"]
+        assert call_kwargs["extra_args"] == [
+            "--permission-mode",
+            "plan",
+            "--tools",
+            "Read,Glob,Grep",
+        ]
+        writer_kwargs = mock_client.spawn_agent.call_args_list[1].kwargs
+        assert writer_kwargs["extra_args"] == [
+            "--no-alt-screen",
+            "-s",
+            "workspace-write",
+            "-a",
+            "never",
+        ]
+        assert "Tek yazım sorumlusu sensin" in writer_kwargs["system_prompt"]
 
         # 2. Görev İletişimi
         await runtime.broadcast_mission(session, "Başlayın")
@@ -232,5 +249,41 @@ def test_collaboration_runtime_not_available_raises() -> None:
                 task_prompt="test",
                 roles=[AgentRole("a", "claude", "r", "p")],
             )
+
+    asyncio.run(scenario())
+
+
+def test_hcom_command_timeout_terminates_process_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    class TestHcomClient(HcomClient):
+        async def run_with_timeout(self, timeout: float) -> tuple[int, str, str]:
+            return await self._run_command(["list"], timeout=timeout)
+
+    async def scenario() -> None:
+        captured: dict[str, object] = {}
+        process = MagicMock(spec=asyncio.subprocess.Process)
+        process.returncode = None
+        process.pid = None
+        process.terminate = MagicMock()
+        process.wait = AsyncMock(return_value=0)
+
+        async def communicate() -> tuple[bytes, bytes]:
+            await asyncio.sleep(1)
+            return b"", b""
+
+        process.communicate = communicate
+
+        async def fake_create(*args: str, **kwargs: object) -> asyncio.subprocess.Process:
+            del args
+            captured.update(kwargs)
+            return cast(asyncio.subprocess.Process, process)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+        client = TestHcomClient("python3")
+
+        with pytest.raises(HcomClientError, match="zaman aşımına uğradı"):
+            await client.run_with_timeout(0.001)
+
+        assert captured["start_new_session"] is True
+        process.terminate.assert_called_once()
 
     asyncio.run(scenario())

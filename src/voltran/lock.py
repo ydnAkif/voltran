@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -33,24 +35,14 @@ class FileLockManager:
 
     def _lock_file_path(self, target_file: Path) -> Path:
         resolved = target_file.resolve()
-        # Dosya yolunu deterministik ve güvenli bir dosya adına dönüştür
-        safe_name = str(resolved).replace("/", "%").replace("\\", "%")
-        return self.lock_dir / f"{safe_name}.lock"
+        # Dosya sistemi ad sınırından bağımsız, deterministik bir kilit adı kullan.
+        digest = sha256(str(resolved).encode("utf-8")).hexdigest()
+        return self.lock_dir / f"{digest}.lock"
 
     def acquire(self, target_file: Path, holder: str) -> bool:
         """Belirtilen dosya için kilit alır. Kilit boşsa veya aynı tutucuya aitse True döner."""
         self._ensure_lock_dir()
         lock_path = self._lock_file_path(target_file)
-
-        if lock_path.exists():
-            try:
-                data = json.loads(lock_path.read_text(encoding="utf-8"))
-                current_holder = str(data.get("holder", ""))
-                return current_holder == holder
-
-            except (json.JSONDecodeError, OSError):
-                # Bozuk kilit dosyası varsa yeniden yazmaya izin ver
-                pass
 
         payload = {
             "file_path": str(target_file.resolve()),
@@ -58,8 +50,19 @@ class FileLockManager:
             "acquired_at": time.time(),
         }
         try:
-            lock_path.write_text(json.dumps(payload), encoding="utf-8")
+            # O_EXCL, iki süreç aynı anda kilit almaya çalıştığında yalnızca
+            # birinin dosyayı oluşturabilmesini garanti eder.
+            fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream)
             return True
+        except FileExistsError:
+            try:
+                data = json.loads(lock_path.read_text(encoding="utf-8"))
+                return str(data.get("holder", "")) == holder
+            except (json.JSONDecodeError, OSError):
+                # Sahibi doğrulanamayan bir kilidi ezmek güvenli değildir.
+                return False
         except OSError:
             return False
 

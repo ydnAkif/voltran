@@ -40,6 +40,7 @@ class _DummyAdapter:
         self.fail = fail
         self.raise_exc = raise_exc
         self.received_tasks: list[ProviderTask] = []
+        self.received_contexts: list[str | None] = []
 
     def availability(self) -> bool:
         return True
@@ -57,6 +58,7 @@ class _DummyAdapter:
         policy: ExecutionPolicy,
     ) -> ProviderExecution:
         self.received_tasks.append(task)
+        self.received_contexts.append(context)
         if self.raise_exc:
             raise RuntimeError("Beklenmeyen adaptör çökmesi")
         if self.fail:
@@ -106,6 +108,31 @@ def test_engine_executes_single_mode_forwarding_subtask_role() -> None:
         assert len(claude.received_tasks) == 1
         assert claude.received_tasks[0].role == "Güvenlik Denetçisi"
         assert claude.received_tasks[0].purpose == "Kod açıklarını tara"
+
+    asyncio.run(scenario())
+
+
+def test_engine_sanitizes_prompt_and_context_before_provider_call(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        adapter = _DummyAdapter("claude", "ok")
+        context_file = tmp_path / "context.txt"
+        context_file.write_text("email=user@example.com", encoding="utf-8")
+        plan = TaskPlan(
+            mode=ExecutionMode.EXPERT,
+            reasoning="test",
+            context_file=context_file,
+            subtasks=[SubTask(role="uzman", purpose="test", assigned_provider="claude")],
+        )
+
+        report = await ExecutionEngine({"claude": adapter}).execute_plan(
+            "token sk-1234567890abcdef1234567890", plan
+        )
+
+        assert "sk-1234567890abcdef1234567890" not in adapter.received_tasks[0].prompt
+        assert "[REDACTED_API_KEY]" in adapter.received_tasks[0].prompt
+        assert adapter.received_contexts == ["email=[REDACTED_EMAIL]"]
+        # Yerel rapor özgün kullanıcı görevini korur; kalıcı store ayrıca maskeler.
+        assert "sk-1234567890abcdef1234567890" in report.task_prompt
 
     asyncio.run(scenario())
 
@@ -202,6 +229,20 @@ class _FakeSupervisor:
         )
 
 
+class _CompletedWithoutConsensusSupervisor:
+    async def monitor(self, **_: object) -> SupervisionOutcome:
+        return SupervisionOutcome(
+            status=SupervisionStatus.COMPLETED,
+            reason="Konsey sakin duruma geçti.",
+            events=[
+                HcomEvent("1", "", "message", "agent0", content="İlk görüş"),
+                HcomEvent("2", "", "message", "agent1", content="İkinci görüş"),
+            ],
+            participants={"agent0", "agent1"},
+            consensus_reached=False,
+        )
+
+
 def test_engine_executes_council_through_live_collaboration_runtime() -> None:
     async def scenario() -> None:
         runtime = _FakeCollaborationRuntime()
@@ -241,6 +282,32 @@ def test_engine_executes_council_through_live_collaboration_runtime() -> None:
         assert report.final_summary == "Ortak nihai karar"
         assert len(runtime.sent_roles) == 3
         assert runtime.terminated is True
+
+    asyncio.run(scenario())
+
+
+def test_engine_does_not_claim_consensus_for_idle_completion() -> None:
+    async def scenario() -> None:
+        runtime = _FakeCollaborationRuntime()
+        engine = ExecutionEngine(
+            {},
+            collaboration_runtime=cast(CollaborationRuntime, runtime),
+            supervisor=cast(CollaborationSupervisor, _CompletedWithoutConsensusSupervisor()),
+        )
+        plan = TaskPlan(
+            mode=ExecutionMode.COUNCIL,
+            reasoning="konsey testi",
+            subtasks=[
+                SubTask(role="A", purpose="p1", assigned_provider="claude"),
+                SubTask(role="B", purpose="p2", assigned_provider="codex"),
+            ],
+        )
+
+        report = await engine.execute_plan("Karşılaştır", plan)
+
+        assert report.synthesis is not None
+        assert report.synthesis.consensus == []
+        assert report.synthesis.disagreements
 
     asyncio.run(scenario())
 

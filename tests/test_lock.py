@@ -37,3 +37,23 @@ def test_file_lock_lifecycle(tmp_path: Path) -> None:
     # 8. release_all tüm kilitleri temizler
     lock_mgr.release_all()
     assert lock_mgr.get_holder(target_file) is None
+
+
+def test_corrupt_lock_is_not_overwritten(tmp_path: Path) -> None:
+    lock_mgr = FileLockManager(root_dir=tmp_path)
+    target_file = tmp_path / "app.py"
+    assert lock_mgr.acquire(target_file, "original-holder") is True
+    lock_file = next(lock_mgr.lock_dir.glob("*.lock"))
+    lock_file.write_text("not-json", encoding="utf-8")
+
+    assert lock_mgr.acquire(target_file, "agent-1") is False
+    assert lock_file.read_text(encoding="utf-8") == "not-json"
+
+
+def test_long_target_path_uses_bounded_hash_filename(tmp_path: Path) -> None:
+    target_file = tmp_path / ("deep-segment-" * 30) / "app.py"
+    lock_mgr = FileLockManager(root_dir=tmp_path)
+
+    assert lock_mgr.acquire(target_file, "agent-1") is True
+    lock_file = next(lock_mgr.lock_dir.glob("*.lock"))
+    assert len(lock_file.name) == 69  # 64 hex characters + '.lock'

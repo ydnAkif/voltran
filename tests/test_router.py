@@ -80,3 +80,24 @@ def test_router_respects_allowed_providers_filter() -> None:
 
     assigned_plan = router.assign_providers(plan, allowed_providers=["codex"])
     assert assigned_plan.subtasks[0].assigned_provider == "codex"
+
+
+def test_router_drops_unfillable_council_roles_instead_of_reusing_provider() -> None:
+    registry: dict[str, ProviderAdapter] = {
+        "codex": _MockAdapter("codex"),
+        "google": _MockAdapter("google"),
+    }
+    plan = TaskPlan(
+        mode=ExecutionMode.COUNCIL,
+        reasoning="Test",
+        subtasks=[
+            SubTask(role="analist", purpose="p1"),
+            SubTask(role="uygulayıcı", purpose="p2"),
+            SubTask(role="hakem", purpose="p3"),
+        ],
+    )
+
+    assigned = Router(registry).assign_providers(plan)
+
+    assert len(assigned.subtasks) == 2
+    assert len({subtask.assigned_provider for subtask in assigned.subtasks}) == 2

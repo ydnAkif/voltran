@@ -4,6 +4,10 @@ import asyncio
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock
+
+from pytest import MonkeyPatch
 
 from voltran.models import ExecutionPolicy, ProviderCapabilities, ProviderTask
 from voltran.providers import AntigravityAdapter, ClaudeAdapter, CodexAdapter, default_registry
@@ -120,5 +124,27 @@ def test_active_execution_can_be_cancelled(tmp_path: Path) -> None:
 
         assert cancelled is True
         assert execution.status == "cancelled"
+
+    asyncio.run(scenario())
+
+
+def test_health_check_starts_isolated_process_group(monkeypatch: MonkeyPatch) -> None:
+    async def scenario() -> None:
+        captured: dict[str, object] = {}
+        process = MagicMock(spec=asyncio.subprocess.Process)
+        process.returncode = 0
+        process.communicate = AsyncMock(return_value=(b"1.0\n", b""))
+
+        async def fake_create(*args: str, **kwargs: object) -> asyncio.subprocess.Process:
+            del args
+            captured.update(kwargs)
+            return cast(asyncio.subprocess.Process, process)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+
+        health = await _PythonAdapter("pass").health_check()
+
+        assert health.available is True
+        assert captured["start_new_session"] is True
 
     asyncio.run(scenario())

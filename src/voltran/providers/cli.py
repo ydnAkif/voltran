@@ -94,6 +94,7 @@ class CliProviderAdapter(ABC):
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
         except OSError as exc:
             return ProviderHealth(

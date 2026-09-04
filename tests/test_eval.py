@@ -1,11 +1,19 @@
 import asyncio
 import json
+from unittest.mock import AsyncMock, MagicMock
 
 from typer.testing import CliRunner
 
 from voltran.cli import app
 from voltran.eval import DEFAULT_BENCHMARK_SUITE, BenchmarkRunner
-from voltran.models import ExecutionStatus
+from voltran.models import (
+    CouncilSynthesis,
+    ExecutionMode,
+    ExecutionReport,
+    ExecutionStatus,
+    ProviderExecution,
+    TaskPlan,
+)
 
 runner = CliRunner()
 
@@ -43,3 +51,59 @@ def test_cli_bench_dry_run_json() -> None:
     assert len(payload) == len(DEFAULT_BENCHMARK_SUITE)
     assert payload[0]["task_id"] == "bench-arch-01"
     assert payload[0]["status"] == "success"
+
+
+def test_benchmark_propagates_failed_execution_status() -> None:
+    task = DEFAULT_BENCHMARK_SUITE[0]
+    report = ExecutionReport(
+        task_prompt=task.prompt,
+        mode=ExecutionMode.COUNCIL,
+        plan=TaskPlan(mode=ExecutionMode.COUNCIL, reasoning="test"),
+        executions=[
+            ProviderExecution(
+                run_id="failed",
+                provider="hcom",
+                status=ExecutionStatus.FAILED,
+                duration_ms=5,
+                error="council failed",
+            )
+        ],
+        final_summary="council failed",
+    )
+    engine = MagicMock()
+    engine.execute_plan = AsyncMock(return_value=report)
+    router = MagicMock()
+    bench_runner = BenchmarkRunner(tasks=[task], router=router, engine=engine)
+
+    result = asyncio.run(bench_runner.run_task(task))
+
+    assert result.status is ExecutionStatus.FAILED
+
+
+def test_benchmark_does_not_report_consensus_when_disagreements_remain() -> None:
+    task = DEFAULT_BENCHMARK_SUITE[0]
+    report = ExecutionReport(
+        task_prompt=task.prompt,
+        mode=ExecutionMode.COUNCIL,
+        plan=TaskPlan(mode=ExecutionMode.COUNCIL, reasoning="test"),
+        executions=[
+            ProviderExecution(
+                run_id="ok",
+                provider="claude",
+                status=ExecutionStatus.SUCCESS,
+                duration_ms=5,
+            )
+        ],
+        final_summary="done",
+        synthesis=CouncilSynthesis(
+            consensus=["session completed"],
+            disagreements=["explicit consensus was not reached"],
+        ),
+    )
+    engine = MagicMock()
+    engine.execute_plan = AsyncMock(return_value=report)
+    bench_runner = BenchmarkRunner(tasks=[task], router=MagicMock(), engine=engine)
+
+    result = asyncio.run(bench_runner.run_task(task))
+
+    assert result.consensus_reached is False

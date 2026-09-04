@@ -56,10 +56,12 @@ class Reporter:
 
         for exec_res in report.executions:
             status_emoji = "✅" if exec_res.status == "success" else "❌"
-            p_name = exec_res.provider.capitalize()
+            role = "-"
+            if exec_res.result is not None:
+                role = str(exec_res.result.metadata.get("role") or "-").replace("|", "\\|")
             p_key = exec_res.provider
             row = (
-                f"| {p_name} | `{p_key}` | {status_emoji} {exec_res.status} | "
+                f"| {role} | `{p_key}` | {status_emoji} {exec_res.status} | "
                 f"{exec_res.duration_ms} |"
             )
             lines.append(row)

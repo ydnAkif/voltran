@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 from typing import cast
 
@@ -50,7 +51,7 @@ class RunStore:
 
     def _init_db(self) -> None:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 conn.execute(
                     """
                     CREATE TABLE IF NOT EXISTS runs (
@@ -74,14 +75,16 @@ class RunStore:
 
         providers = [e.provider for e in report.executions]
         overall_status = (
-            "success" if any(e.status == "success" for e in report.executions) else "failed"
+            "success"
+            if report.executions and all(e.status == "success" for e in report.executions)
+            else "failed"
         )
 
         clean_prompt = sanitize_text(report.task_prompt[:300])
         clean_summary = sanitize_text(report.final_summary[:500])
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO runs (
@@ -108,7 +111,7 @@ class RunStore:
         """En son çalıştırılan görevleri döndürür."""
 
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """

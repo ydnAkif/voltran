@@ -81,12 +81,19 @@ class CollaborationRuntime:
 
         try:
             known_names = {agent.name for agent in await self.client.list_agents(cwd=work_path)}
-            for agent_role in roles:
+            for role_index, agent_role in enumerate(roles):
+                # Aynı council oturumunda birden fazla modelin aynı çalışma
+                # ağacına eşzamanlı yazmasını engelle; son rol sentez/yazım
+                # sorumlusu, diğerleri salt-okunur hakemlerdir.
+                role_can_write = allow_writes and role_index == len(roles) - 1
                 peer_addresses = ", ".join(f"@{role.name}-" for role in roles if role != agent_role)
                 restriction = (
                     "Kabuk komutu veya araç çağırma; yalnızca verilen metni tartış.\n"
-                    if not allow_writes
-                    else "Yalnızca görev kapsamındaki araçları kullan.\n"
+                    if not role_can_write
+                    else (
+                        "Tek yazım sorumlusu sensin; yalnızca görev kapsamındaki "
+                        "dosyaları değiştir.\n"
+                    )
                 )
                 blind_instruction = (
                     "KÖR HAKEMLİK MODU: Diğer modellerin marka veya model isimlerini "
@@ -113,13 +120,17 @@ class CollaborationRuntime:
                 extra_args: list[str] = []
                 if agent_role.model:
                     extra_args.extend(("--model", agent_role.model))
-                if agent_role.provider == "codex":
+                if agent_role.provider == "claude":
+                    permission_mode = "acceptEdits" if role_can_write else "plan"
+                    tools = "default" if role_can_write else "Read,Glob,Grep"
+                    extra_args.extend(("--permission-mode", permission_mode, "--tools", tools))
+                elif agent_role.provider == "codex":
                     extra_args.append("--no-alt-screen")
-                    if not allow_writes:
-                        extra_args.extend(("-s", "read-only", "-a", "never"))
+                    sandbox = "workspace-write" if role_can_write else "read-only"
+                    extra_args.extend(("-s", sandbox, "-a", "never"))
                 elif agent_role.provider in {"google", "agy", "antigravity"}:
-                    if not allow_writes:
-                        extra_args.extend(("--sandbox", "--mode", "plan"))
+                    mode = "accept-edits" if role_can_write else "plan"
+                    extra_args.extend(("--sandbox", "--mode", mode))
 
                 proc = await self.client.spawn_agent(
                     provider=agent_role.provider,

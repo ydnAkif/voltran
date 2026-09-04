@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -72,6 +73,7 @@ class HcomClient:
         """hcom alt komutunu güvenli biçimde çalıştırır."""
         self._ensure_available()
         cmd = [self.executable, *args]
+        process: asyncio.subprocess.Process | None = None
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -79,6 +81,7 @@ class HcomClient:
                 cwd=str(cwd) if cwd else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 process.communicate(),
@@ -90,6 +93,8 @@ class HcomClient:
                 stderr_bytes.decode("utf-8", errors="replace"),
             )
         except TimeoutError as exc:
+            if process is not None:
+                await self._terminate_process(process)
             raise HcomClientError(
                 f"hcom komutu ({' '.join(args)}) {timeout} saniye içinde zaman aşımına uğradı."
             ) from exc
@@ -126,6 +131,7 @@ class HcomClient:
         if system_prompt:
             cmd.extend(("--hcom-system-prompt", system_prompt))
         cmd.extend(extra_args)
+        process: asyncio.subprocess.Process | None = None
 
         try:
             # --headless ajanı hcom'un PTY yöneticisine devreder. Launcher,
@@ -139,6 +145,7 @@ class HcomClient:
                 env=child_env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
             )
             stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=45.0)
             if process.returncode != 0:
@@ -152,11 +159,39 @@ class HcomClient:
                     raise HcomClientError(f"Ajan '{provider}' başlatılamadı: {detail}")
             return process
         except TimeoutError as exc:
+            if process is not None:
+                await self._terminate_process(process)
             raise HcomClientError(f"Ajan '{provider}' 45 saniye içinde başlatılamadı.") from exc
         except HcomClientError:
             raise
         except Exception as exc:
             raise HcomClientError(f"Ajan '{provider}' başlatılamadı: {exc}") from exc
+
+    @staticmethod
+    async def _terminate_process(process: asyncio.subprocess.Process) -> None:
+        """Zaman aşımına uğrayan hcom sürecini ve alt süreç grubunu temizle."""
+        if process.returncode is not None:
+            return
+        try:
+            if process.pid and os.name == "posix":
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+        except ProcessLookupError:
+            return
+        try:
+            await asyncio.wait_for(process.wait(), timeout=1.0)
+            return
+        except TimeoutError:
+            pass
+        try:
+            if process.pid and os.name == "posix":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            return
+        await process.wait()
 
     async def send_message(
         self,

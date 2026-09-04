@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from pytest import MonkeyPatch
 from typer.testing import CliRunner
@@ -90,3 +91,29 @@ def test_run_blind_and_write_options() -> None:
     assert result.exit_code == 0
     assert "Kör Hakemlik" in result.stdout
     assert "Dosya Yazma" in result.stdout
+
+
+def test_run_stops_when_write_lock_cannot_be_acquired(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    def deny_lock(lock_manager: object, target_file: Path, holder: str) -> bool:
+        del lock_manager, target_file, holder
+        return False
+
+    def existing_holder(lock_manager: object, target_file: Path) -> str:
+        del lock_manager, target_file
+        return "another-voltran-run"
+
+    context_file = tmp_path / "context.py"
+    context_file.write_text("print('hello')", encoding="utf-8")
+    monkeypatch.setattr("voltran.lock.FileLockManager.acquire", deny_lock)
+    monkeypatch.setattr("voltran.lock.FileLockManager.get_holder", existing_holder)
+
+    result = runner.invoke(
+        app,
+        ["run", "Dosyayı düzelt", "--file", str(context_file), "--write", "--dry-run"],
+    )
+
+    assert result.exit_code == 1
+    assert "Dosya kilidi alınamadı" in result.stdout
+    assert "another-voltran-run" in result.stdout

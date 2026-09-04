@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 from voltran.models import ExecutionMode, ExecutionPolicy, SubTask, TaskPlan
 
 _COUNCIL_KEYWORDS = (
     r"\b(karşılaştır|kıyasla|mimari|finans|yatırım|risk|güvenlik|denetle|hakem|karar|"
-    r"doğrula|tartış|konsensüs|audit|architecture|tradeoff|compare)\b"
+    r"doğrula|tartış|konsensüs|audit|architecture|tradeoff|compare)\w*"
 )
 _QUICK_KEYWORDS = (
     r"\b(hızlıca|kısaca|özetle|formatla|düzelt|çevir|anlamı ne|nedir|küçük|tek satır|"
     r"quick|summarize|format|typo)\b"
 )
-_VISUAL_KEYWORDS = r"\b(görsel|resim|çizim|diyagram|mockup|şema|logo|infografik|diagram)\b"
+_VISUAL_KEYWORDS = r"\b(görsel|resim|çizim|diyagram|mockup|şema|logo|infografik|diagram)\w*"
+
+
+def _normalize_for_matching(prompt: str) -> str:
+    """Türkçe büyük İ'nin casefold sonrası birleşik noktasını ayıkla."""
+
+    return unicodedata.normalize("NFC", prompt.casefold().replace("i\u0307", "i"))
 
 
 def detect_mode(
@@ -28,7 +35,7 @@ def detect_mode(
     if explicit_mode is not None:
         return explicit_mode, "Kullanıcı tarafından açıkça belirtildi."
 
-    lower = prompt.lower()
+    lower = _normalize_for_matching(prompt)
 
     if re.search(_VISUAL_KEYWORDS, lower):
         return (
@@ -87,19 +94,19 @@ class Commander:
             case ExecutionMode.COUNCIL:
                 subtasks.append(
                     SubTask(
-                        role="Claude çalışma ortağı",
+                        role="Mimari ve risk analisti",
                         purpose="Ortak çözümü analiz, eleştiri ve önerilerle geliştir.",
                     )
                 )
                 subtasks.append(
                     SubTask(
-                        role="Codex çalışma ortağı",
+                        role="Uygulama ve doğrulama uzmanı",
                         purpose="Diğer ortakların görüşlerine yanıt ver ve çözümü ilerlet.",
                     )
                 )
                 subtasks.append(
                     SubTask(
-                        role="Antigravity çalışma ortağı",
+                        role="Eleştirel sentez uzmanı",
                         purpose="Ortak konuşmayı değerlendir ve uzlaşıya katkı sağla.",
                     )
                 )

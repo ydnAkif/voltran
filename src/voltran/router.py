@@ -122,15 +122,11 @@ class Router:
         )
 
         if plan.mode == ExecutionMode.COUNCIL:
-            # Council için en yüksek puanlı iki farklı sağlayıcıyı eşleştir
-            assigned_keys: set[str] = set()
-            for idx, subtask in enumerate(plan.subtasks):
-                candidate = next(
-                    (a for a in ranked if a.key not in assigned_keys),
-                    ranked[idx % len(ranked)],
-                )
+            # Her sağlayıcı council içinde en fazla bir ajan çalıştırır. Eksik
+            # sağlayıcılar marka çeşitliliği varmış gibi çoğaltılmaz.
+            plan.subtasks = plan.subtasks[: len(ranked)]
+            for subtask, candidate in zip(plan.subtasks, ranked, strict=True):
                 subtask.assigned_provider = candidate.key
-                assigned_keys.add(candidate.key)
         else:
             best_adapter = ranked[0]
             for subtask in plan.subtasks:

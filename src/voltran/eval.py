@@ -113,15 +113,20 @@ class BenchmarkRunner:
         report: ExecutionReport = await self.engine.execute_plan(task.prompt, plan, dry_run=dry_run)
 
         # Durum ve uzlaşma tespiti
-        has_failure = any(e.status is ExecutionStatus.FAILED for e in report.executions)
-        overall_status = (
-            ExecutionStatus.FAILED
-            if has_failure and not report.executions
-            else ExecutionStatus.SUCCESS
-        )
+        statuses = {execution.status for execution in report.executions}
+        if not statuses or ExecutionStatus.FAILED in statuses:
+            overall_status = ExecutionStatus.FAILED
+        elif ExecutionStatus.TIMED_OUT in statuses:
+            overall_status = ExecutionStatus.TIMED_OUT
+        elif ExecutionStatus.CANCELLED in statuses:
+            overall_status = ExecutionStatus.CANCELLED
+        else:
+            overall_status = ExecutionStatus.SUCCESS
 
         confidence = report.synthesis.confidence_score if report.synthesis else 1.0
-        consensus = bool(report.synthesis and report.synthesis.consensus)
+        consensus = bool(
+            report.synthesis and report.synthesis.consensus and not report.synthesis.disagreements
+        )
 
         return BenchmarkResult(
             task_id=task.task_id,
