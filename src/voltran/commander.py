@@ -20,9 +20,10 @@ _VISUAL_KEYWORDS = r"\b(görsel|resim|çizim|diyagram|mockup|şema|logo|infograf
 
 
 def _normalize_for_matching(prompt: str) -> str:
-    """Türkçe büyük İ'nin casefold sonrası birleşik noktasını ayıkla."""
+    """Türkçe I/İ harflerini casefold öncesinde doğru küçük harfe dönüştür."""
 
-    return unicodedata.normalize("NFC", prompt.casefold().replace("i\u0307", "i"))
+    turkish_lower = prompt.replace("I", "ı").replace("İ", "i")
+    return unicodedata.normalize("NFC", turkish_lower.casefold().replace("i\u0307", "i"))
 
 
 def detect_mode(

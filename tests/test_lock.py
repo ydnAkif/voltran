@@ -57,3 +57,22 @@ def test_long_target_path_uses_bounded_hash_filename(tmp_path: Path) -> None:
     assert lock_mgr.acquire(target_file, "agent-1") is True
     lock_file = next(lock_mgr.lock_dir.glob("*.lock"))
     assert len(lock_file.name) == 69  # 64 hex characters + '.lock'
+
+
+def test_stale_lock_can_be_reclaimed(tmp_path: Path) -> None:
+    target_file = tmp_path / "app.py"
+    lock_mgr = FileLockManager(root_dir=tmp_path, ttl_seconds=0)
+    assert lock_mgr.acquire(target_file, "crashed-run") is True
+
+    assert lock_mgr.acquire(target_file, "new-run") is True
+    assert lock_mgr.get_holder(target_file) == "new-run"
+
+
+def test_force_release_removes_unknown_or_corrupt_lock(tmp_path: Path) -> None:
+    target_file = tmp_path / "app.py"
+    lock_mgr = FileLockManager(root_dir=tmp_path)
+    assert lock_mgr.acquire(target_file, "crashed-run") is True
+    next(lock_mgr.lock_dir.glob("*.lock")).write_text("corrupt", encoding="utf-8")
+
+    assert lock_mgr.force_release(target_file) is True
+    assert list(lock_mgr.lock_dir.glob("*.lock")) == []

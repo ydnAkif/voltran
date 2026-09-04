@@ -42,6 +42,9 @@ def test_detect_mode_respects_explicit_override() -> None:
 def test_detect_mode_handles_turkish_suffixes_and_capital_dotted_i() -> None:
     assert detect_mode("Bu modülün mimarisi doğru mu?")[0] is ExecutionMode.COUNCIL
     assert detect_mode("RİSKLERİ ayrıntılı biçimde değerlendir")[0] is ExecutionMode.COUNCIL
+    assert detect_mode("KIYASLA")[0] is ExecutionMode.COUNCIL
+    assert detect_mode("KARŞILAŞTIR")[0] is ExecutionMode.COUNCIL
+    assert detect_mode("TARTIŞ")[0] is ExecutionMode.COUNCIL
 
 
 def test_commander_creates_plan_with_subtasks(tmp_path: Path) -> None:

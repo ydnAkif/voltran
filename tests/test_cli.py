@@ -117,3 +117,23 @@ def test_run_stops_when_write_lock_cannot_be_acquired(
     assert result.exit_code == 1
     assert "Dosya kilidi alınamadı" in result.stdout
     assert "another-voltran-run" in result.stdout
+
+
+def test_unlock_file_and_all(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    from voltran.lock import FileLockManager
+
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    lock_mgr = FileLockManager()
+    assert lock_mgr.acquire(first, "crashed-1") is True
+    assert lock_mgr.acquire(second, "crashed-2") is True
+
+    result = runner.invoke(app, ["unlock", str(first)])
+    assert result.exit_code == 0
+    assert lock_mgr.get_holder(first) is None
+    assert lock_mgr.get_holder(second) == "crashed-2"
+
+    result = runner.invoke(app, ["unlock", "--all"])
+    assert result.exit_code == 0
+    assert lock_mgr.list_active_locks() == []

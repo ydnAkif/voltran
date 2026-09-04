@@ -125,7 +125,8 @@ class Router:
             # Her sağlayıcı council içinde en fazla bir ajan çalıştırır. Eksik
             # sağlayıcılar marka çeşitliliği varmış gibi çoğaltılmaz.
             plan.subtasks = plan.subtasks[: len(ranked)]
-            for subtask, candidate in zip(plan.subtasks, ranked, strict=True):
+            candidates = ranked[: len(plan.subtasks)]
+            for subtask, candidate in zip(plan.subtasks, candidates, strict=True):
                 subtask.assigned_provider = candidate.key
         else:
             best_adapter = ranked[0]

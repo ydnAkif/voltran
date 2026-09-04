@@ -19,7 +19,7 @@ from voltran.models import (
     TaskResult,
 )
 from voltran.providers import ProviderAdapter, default_registry
-from voltran.sanitizer import sanitize_text
+from voltran.sanitizer import sanitize_for_provider
 from voltran.supervisor import (
     CollaborationSupervisor,
     SupervisionStatus,
@@ -59,9 +59,9 @@ class ExecutionEngine:
                 context = f"[Bağlam dosyası okunamadı: {exc}]"
 
         # Gizli değerler sağlayıcı süreçlerine ulaşmadan önce maskelenir.
-        provider_prompt = sanitize_text(prompt)
+        provider_prompt = sanitize_for_provider(prompt)
         if context is not None:
-            context = sanitize_text(context)
+            context = sanitize_for_provider(context)
 
         if dry_run:
             executions: list[ProviderExecution] = []
@@ -204,11 +204,6 @@ class ExecutionEngine:
             for index, subtask in enumerate(plan.subtasks, start=1)
         ]
         working_dir = plan.context_file.parent if plan.context_file else Path.cwd()
-        permission_note = (
-            "Dosyalarda değişiklik yapma; yalnızca analiz et."
-            if not plan.policy.allow_writes
-            else "Yalnızca verilen görev kapsamındaki dosyalarda değişiklik yap."
-        )
         session_prompt = provider_prompt
         if context:
             session_prompt += f"\n\nBAĞLAM:\n{context[: plan.policy.max_output_chars]}"
@@ -228,14 +223,20 @@ class ExecutionEngine:
                 raise HcomClientError("Başlatılan hcom ajan kimlikleri doğrulanamadı.")
 
             addresses = ", ".join(f"@{role.name}-" for role in roles)
-            mission = (
-                f"VOLTRAN ortak görevi başladı. Ekip: {addresses}. {permission_note} "
-                "Birbirinizin görüşünü isteyin, itirazları doğrudan tartışın ve görev "
-                "devredin. Kendi katkınız bittiğinde VOLTRAN_DONE yazın. En az iki ajan "
-                "ortak karara vardığında nihai mesajda VOLTRAN_CONSENSUS kullanın."
-            )
             # Global broadcast kullanma: aynı makinedeki başka hcom oturumlarını uyandırabilir.
-            for role in roles:
+            for role_index, role in enumerate(roles):
+                role_can_write = plan.policy.allow_writes and role_index == len(roles) - 1
+                permission_note = (
+                    "Tek yazım sorumlusu sensin; görev kapsamındaki dosyaları değiştirebilirsin."
+                    if role_can_write
+                    else "Dosyalarda değişiklik yapma; yalnızca analiz et ve öneri sun."
+                )
+                mission = (
+                    f"VOLTRAN ortak görevi başladı. Ekip: {addresses}. {permission_note} "
+                    "Birbirinizin görüşünü isteyin, itirazları doğrudan tartışın ve görev "
+                    "devredin. Kendi katkın bittiğinde VOLTRAN_DONE yaz. En az iki ajan "
+                    "ortak karara vardığında nihai mesajda VOLTRAN_CONSENSUS kullan."
+                )
                 await self.collaboration_runtime.send_to_role(session, role.name, mission)
 
             supervisor = self.supervisor or CollaborationSupervisor(

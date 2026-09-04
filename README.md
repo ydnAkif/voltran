@@ -164,6 +164,10 @@ uv run voltran run --mode expert --file app.py "Bu kodun güvenlik açıkların�
 # Sonuç raporunu Markdown dosyasına veya JSON formatına kaydetme:
 uv run voltran run "JSON çıktısını özetle" --mode quick --output rapor.md
 uv run voltran run "Hızlı analiz" --json
+
+# Çöken bir yazma çalışmasından kalan kilidi kaldırma:
+uv run voltran unlock app.py
+uv run voltran unlock --all
 ```
 
 ### 💡 Kolay Erişim (Global Kurulum)

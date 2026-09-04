@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+from typing import ClassVar
 
 
 @dataclass(frozen=True)
@@ -26,9 +27,17 @@ class LockInfo:
 class FileLockManager:
     """Yerel disk üzerinde dosya kilitlerini yöneten hafif kilit yöneticisi."""
 
-    def __init__(self, root_dir: Path | None = None) -> None:
+    DEFAULT_TTL_SECONDS: ClassVar[float] = 4 * 60 * 60
+
+    def __init__(
+        self,
+        root_dir: Path | None = None,
+        *,
+        ttl_seconds: float = DEFAULT_TTL_SECONDS,
+    ) -> None:
         self.root_dir = (root_dir or Path.cwd()).resolve()
         self.lock_dir = self.root_dir / ".voltran" / "locks"
+        self.ttl_seconds = ttl_seconds
 
     def _ensure_lock_dir(self) -> None:
         self.lock_dir.mkdir(parents=True, exist_ok=True)
@@ -43,6 +52,17 @@ class FileLockManager:
         """Belirtilen dosya için kilit alır. Kilit boşsa veya aynı tutucuya aitse True döner."""
         self._ensure_lock_dir()
         lock_path = self._lock_file_path(target_file)
+
+        return self._acquire_once(lock_path, target_file, holder, retry_stale=True)
+
+    def _acquire_once(
+        self,
+        lock_path: Path,
+        target_file: Path,
+        holder: str,
+        *,
+        retry_stale: bool,
+    ) -> bool:
 
         payload = {
             "file_path": str(target_file.resolve()),
@@ -59,8 +79,14 @@ class FileLockManager:
         except FileExistsError:
             try:
                 data = json.loads(lock_path.read_text(encoding="utf-8"))
-                return str(data.get("holder", "")) == holder
-            except (json.JSONDecodeError, OSError):
+                if str(data.get("holder", "")) == holder:
+                    return True
+                acquired_at = float(data.get("acquired_at", 0.0))
+                if retry_stale and time.time() - acquired_at >= self.ttl_seconds:
+                    lock_path.unlink(missing_ok=True)
+                    return self._acquire_once(lock_path, target_file, holder, retry_stale=False)
+                return False
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
                 # Sahibi doğrulanamayan bir kilidi ezmek güvenli değildir.
                 return False
         except OSError:
@@ -93,21 +119,36 @@ class FileLockManager:
         except (json.JSONDecodeError, OSError):
             return None
 
-    def release_all(self, holder: str | None = None) -> None:
+    def force_release(self, target_file: Path) -> bool:
+        """Kullanıcının açık isteğiyle hedef dosyanın kilidini kaldır."""
+
+        lock_path = self._lock_file_path(target_file)
+        try:
+            lock_path.unlink(missing_ok=True)
+            return True
+        except OSError:
+            return False
+
+    def release_all(self, holder: str | None = None) -> int:
         """Tüm kilitleri veya belirtilen ajana ait tüm kilitleri temizler."""
         if not self.lock_dir.exists():
-            return
+            return 0
 
+        released = 0
         for lock_file in self.lock_dir.glob("*.lock"):
             if holder is None:
                 lock_file.unlink(missing_ok=True)
+                released += 1
             else:
                 try:
                     data = json.loads(lock_file.read_text(encoding="utf-8"))
                     if str(data.get("holder", "")) == holder:
                         lock_file.unlink(missing_ok=True)
+                        released += 1
                 except (json.JSONDecodeError, OSError):
                     lock_file.unlink(missing_ok=True)
+                    released += 1
+        return released
 
     def list_active_locks(self) -> list[LockInfo]:
         """Mevcut tüm aktif dosya kilitlerini döndürür."""

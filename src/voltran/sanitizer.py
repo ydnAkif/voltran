@@ -40,6 +40,11 @@ _PII_PATTERNS = [
     ),
 ]
 
+# Sağlayıcıya giden kod ve teknik metinde yalnızca yanlış pozitif riski düşük
+# desenler kullanılır. Sayısal sabitler, hash'ler, IBAN-benzeri test fixture'ları
+# ve diğer kod parçaları burada kasıtlı olarak maskelenmez.
+_OUTBOUND_PATTERNS = [*_API_KEY_PATTERNS[:4], _PII_PATTERNS[0]]
+
 
 def sanitize_text(text: str) -> str:
     """Metindeki API anahtarları, parolalar, e-posta, kimlik ve kart bilgilerini maskeler."""
@@ -54,4 +59,13 @@ def sanitize_text(text: str) -> str:
     for pattern, replacement in _PII_PATTERNS:
         sanitized = pattern.sub(replacement, sanitized)
 
+    return sanitized
+
+
+def sanitize_for_provider(text: str) -> str:
+    """Sağlayıcıya gönderilecek metinde yüksek kesinlikli sırları maskele."""
+
+    sanitized = text
+    for pattern, replacement in _OUTBOUND_PATTERNS:
+        sanitized = pattern.sub(replacement, sanitized)
     return sanitized

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from voltran.sanitizer import sanitize_text
+from voltran.sanitizer import sanitize_for_provider, sanitize_text
 
 
 def test_sanitize_masks_api_keys_and_tokens() -> None:
@@ -35,3 +35,18 @@ def test_sanitize_masks_pii() -> None:
     assert "[REDACTED_CARD]" in sanitized
     assert "[REDACTED_IBAN]" in sanitized
     assert "[REDACTED_TCKN]" in sanitized
+
+
+def test_provider_sanitizer_preserves_code_like_pii_but_masks_high_confidence_secrets() -> None:
+    source = (
+        "uint64_t ogrenci_no = 20231234567;\n"
+        'const char* HASH = "AB12CDEF3456789012345";\n'
+        "// user@example.com sk-1234567890abcdef1234567890"
+    )
+
+    sanitized = sanitize_for_provider(source)
+
+    assert "20231234567" in sanitized
+    assert "AB12CDEF3456789012345" in sanitized
+    assert "user@example.com" not in sanitized
+    assert "sk-1234567890abcdef1234567890" not in sanitized

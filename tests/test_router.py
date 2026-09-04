@@ -101,3 +101,19 @@ def test_router_drops_unfillable_council_roles_instead_of_reusing_provider() -> 
 
     assert len(assigned.subtasks) == 2
     assert len({subtask.assigned_provider for subtask in assigned.subtasks}) == 2
+
+
+def test_router_ignores_extra_adapters_beyond_council_role_count() -> None:
+    registry: dict[str, ProviderAdapter] = {
+        key: _MockAdapter(key) for key in ("claude", "codex", "google", "fourth")
+    }
+    plan = TaskPlan(
+        mode=ExecutionMode.COUNCIL,
+        reasoning="Test",
+        subtasks=[SubTask(role=f"role-{index}", purpose="p") for index in range(3)],
+    )
+
+    assigned = Router(registry).assign_providers(plan)
+
+    assert len(assigned.subtasks) == 3
+    assert len({subtask.assigned_provider for subtask in assigned.subtasks}) == 3

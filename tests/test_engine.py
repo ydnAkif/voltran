@@ -142,6 +142,7 @@ class _FakeCollaborationRuntime:
         self.available = available
         self.fail_start = fail_start
         self.sent_roles: list[str] = []
+        self.sent_messages: list[tuple[str, str]] = []
         self.terminated = False
         self.session: CollaborationSession | None = None
 
@@ -184,8 +185,9 @@ class _FakeCollaborationRuntime:
         *,
         reply_to: str | None = None,
     ) -> bool:
-        del session, message, reply_to
+        del session, reply_to
         self.sent_roles.append(target_role)
+        self.sent_messages.append((target_role, message))
         return True
 
     async def poll_events(
@@ -254,6 +256,7 @@ def test_engine_executes_council_through_live_collaboration_runtime() -> None:
         plan = TaskPlan(
             mode=ExecutionMode.COUNCIL,
             reasoning="konsey testi",
+            policy=ExecutionPolicy(allow_writes=True),
             subtasks=[
                 SubTask(
                     role="Mimar A",
@@ -281,6 +284,9 @@ def test_engine_executes_council_through_live_collaboration_runtime() -> None:
         assert len(report.executions) == 3
         assert report.final_summary == "Ortak nihai karar"
         assert len(runtime.sent_roles) == 3
+        assert "değişiklik yapma" in runtime.sent_messages[0][1]
+        assert "değişiklik yapma" in runtime.sent_messages[1][1]
+        assert "Tek yazım sorumlusu" in runtime.sent_messages[2][1]
         assert runtime.terminated is True
 
     asyncio.run(scenario())

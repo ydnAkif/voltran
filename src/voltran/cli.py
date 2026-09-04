@@ -214,6 +214,35 @@ def run(
 
 
 @app.command()
+def unlock(
+    file: Annotated[
+        Path | None,
+        typer.Argument(help="Kilidi kaldırılacak dosya yolu."),
+    ] = None,
+    all_locks: Annotated[
+        bool,
+        typer.Option("--all", help="Bu projedeki tüm Voltran dosya kilitlerini kaldır."),
+    ] = False,
+) -> None:
+    """Çöken çalışmalardan kalan dosya kilitlerini açık kullanıcı isteğiyle kaldır."""
+
+    from voltran.lock import FileLockManager
+
+    lock_mgr = FileLockManager()
+    if all_locks:
+        released = lock_mgr.release_all()
+        console.print(f"[green]{released} kilit kaldırıldı.[/green]")
+        return
+    if file is None:
+        console.print("[red]Bir dosya yolu veya --all belirtin.[/red]")
+        raise typer.Exit(code=2)
+    if not lock_mgr.force_release(file):
+        console.print(f"[red]Kilit kaldırılamadı:[/red] {file}")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Kilit kaldırıldı:[/green] {file}")
+
+
+@app.command()
 def history(
     limit: Annotated[
         int, typer.Option("--limit", "-n", help="Gösterilecek en fazla kayıt sayısı.")
