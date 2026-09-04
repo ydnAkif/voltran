@@ -119,6 +119,11 @@ class FileLockManager:
         except (json.JSONDecodeError, OSError):
             return None
 
+    def has_lock(self, target_file: Path) -> bool:
+        """Hedef dosya için diskte bir kilit var mı? Bozuk kilit dosyaları da sayılır."""
+
+        return self._lock_file_path(target_file).exists()
+
     def force_release(self, target_file: Path) -> bool:
         """Kullanıcının açık isteğiyle hedef dosyanın kilidini kaldır."""
 

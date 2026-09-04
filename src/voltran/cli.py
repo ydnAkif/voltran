@@ -236,6 +236,9 @@ def unlock(
     if file is None:
         console.print("[red]Bir dosya yolu veya --all belirtin.[/red]")
         raise typer.Exit(code=2)
+    if not lock_mgr.has_lock(file):
+        console.print(f"[dim]Kilit bulunmuyor:[/dim] {file}")
+        return
     if not lock_mgr.force_release(file):
         console.print(f"[red]Kilit kaldırılamadı:[/red] {file}")
         raise typer.Exit(code=1)

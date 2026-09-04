@@ -137,3 +137,14 @@ def test_unlock_file_and_all(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
     result = runner.invoke(app, ["unlock", "--all"])
     assert result.exit_code == 0
     assert lock_mgr.list_active_locks() == []
+
+
+def test_unlock_reports_when_no_lock_exists(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "never-locked.py"
+
+    result = runner.invoke(app, ["unlock", str(target)])
+
+    assert result.exit_code == 0
+    assert "Kilit bulunmuyor" in result.stdout
+    assert "Kilit kaldırıldı" not in result.stdout
