@@ -186,3 +186,18 @@ class HistoryRecord(BaseModel):
     providers_used: list[str] = Field(default_factory=lambda: list[str]())
     duration_ms: int
     status: str
+
+
+class StoredRun(BaseModel):
+    """Veritabanından yeniden oynatma veya detaylı inceleme için okunan tam kayıt."""
+
+    run_id: str
+    created_at: str
+    mode: str
+    prompt: str
+    providers: list[str] = Field(default_factory=lambda: list[str]())
+    duration_ms: int
+    status: str
+    summary: str
+    plan: TaskPlan | None = None
+    policy: ExecutionPolicy | None = None

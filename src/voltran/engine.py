@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from voltran.collaboration import AgentRole, CollaborationRuntime
+from voltran.collaboration import (
+    AgentRole,
+    CollaborationRuntime,
+    CollaborationSession,
+)
 from voltran.context import ContextError, load_context
 from voltran.hcom_client import HcomClientError
 from voltran.models import (
@@ -108,6 +114,31 @@ class ExecutionEngine:
         self.registry = registry if registry is not None else default_registry()
         self.collaboration_runtime = collaboration_runtime or CollaborationRuntime()
         self.supervisor = supervisor
+        self._current_run_id: str | None = None
+        self._current_session: CollaborationSession | None = None
+        self._running_tasks: set[str] = set()
+
+    async def cancel_run(self, run_id: str | None = None) -> bool:
+        """Etkin çalışmayı, adaptör alt süreçlerini ve hcom oturumunu sonlandırır."""
+
+        cancelled = False
+        if self._current_session is not None:
+            try:
+                await self.collaboration_runtime.terminate_session(self._current_session)
+                cancelled = True
+            except Exception:
+                pass
+            self._current_session = None
+
+        for subtask_id in list(self._running_tasks):
+            for adapter in self.registry.values():
+                try:
+                    if await adapter.cancel(subtask_id):
+                        cancelled = True
+                except Exception:
+                    pass
+        self._running_tasks.clear()
+        return cancelled
 
     async def execute_plan(
         self,
@@ -173,17 +204,28 @@ class ExecutionEngine:
                 total_duration_ms=0,
             )
 
-        match plan.mode:
-            case ExecutionMode.COUNCIL:
-                report = await self._execute_council(
-                    run_id, prompt, provider_prompt, plan, context, started
-                )
-            case _:
-                report = await self._execute_single_or_expert(
-                    run_id, prompt, provider_prompt, plan, context, started
-                )
+        self._current_run_id = run_id
+        from voltran.store import RunStore
 
-        return report
+        store = RunStore()
+        store.register_active_run(run_id, os.getpid(), plan.mode.value, prompt)
+        try:
+            match plan.mode:
+                case ExecutionMode.COUNCIL:
+                    report = await self._execute_council(
+                        run_id, prompt, provider_prompt, plan, context, started
+                    )
+                case _:
+                    report = await self._execute_single_or_expert(
+                        run_id, prompt, provider_prompt, plan, context, started
+                    )
+            return report
+        except asyncio.CancelledError:
+            await self.cancel_run(run_id)
+            raise
+        finally:
+            self._current_run_id = None
+            store.unregister_active_run(run_id)
 
     async def _execute_single_or_expert(
         self,
@@ -220,7 +262,12 @@ class ExecutionEngine:
                 purpose=st.purpose,
                 model=st.model,
             )
-            execution = await adapter.execute(task, context, plan.policy)
+            self._running_tasks.add(st.subtask_id)
+            try:
+                execution = await adapter.execute(task, context, plan.policy)
+            finally:
+                self._running_tasks.discard(st.subtask_id)
+
             if execution.result:
                 execution.result.metadata["role"] = st.role
                 execution.result.metadata["purpose"] = st.purpose
@@ -293,6 +340,7 @@ class ExecutionEngine:
                 allow_writes=plan.policy.allow_writes,
                 blind_mode=plan.policy.blind_mode,
             )
+            self._current_session = session
 
             if len(session.event_names) != len(roles):
                 raise HcomClientError("Başlatılan hcom ajan kimlikleri doğrulanamadı.")
@@ -421,6 +469,7 @@ class ExecutionEngine:
                 error=f"Canlı konsey başlatılamadı: {exc}",
             )
         finally:
+            self._current_session = None
             if session is not None:
                 await self.collaboration_runtime.terminate_session(session)
 

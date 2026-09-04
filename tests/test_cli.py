@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from pytest import MonkeyPatch
@@ -326,3 +327,151 @@ def test_run_reports_broken_config_file(monkeypatch: MonkeyPatch, tmp_path: Path
 
     assert result.exit_code == 2
     assert "Yapılandırma hatası" in result.stdout
+
+
+def test_replay_command_missing_and_legacy(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from voltran.models import ExecutionMode, ExecutionReport, TaskPlan
+    from voltran.store import RunStore
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "voltran.db"
+    store = RunStore(db_path)
+    monkeypatch.setattr("voltran.store.get_default_db_path", lambda: db_path)
+
+    # 1. Olmayan çalıştırma
+    result = runner.invoke(app, ["replay", "non-existent-id"])
+    assert result.exit_code == 1
+    assert "Çalıştırma bulunamadı" in result.stdout
+
+    # 2. Plan bilgisi olmayan eski formatta kayıt
+    plan = TaskPlan(mode=ExecutionMode.QUICK, reasoning="eski")
+    report = ExecutionReport(
+        run_id="legacy-run-123",
+        task_prompt="Eski görev",
+        mode=ExecutionMode.QUICK,
+        plan=plan,
+        executions=[],
+        final_summary="Eski özet",
+    )
+    store.save_report(report)
+    # plan_json alanını elle null yapalım (eski veri simülasyonu)
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("UPDATE runs SET plan_json = NULL WHERE run_id = 'legacy-run-123'")
+        conn.commit()
+
+    result = runner.invoke(app, ["replay", "legacy-run-123"])
+    assert result.exit_code == 1
+    assert "eski formatta" in result.stdout
+
+
+def test_replay_command_success(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from voltran.models import ExecutionMode, ExecutionReport, TaskPlan
+    from voltran.store import RunStore
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "voltran.db"
+    store = RunStore(db_path)
+    monkeypatch.setattr("voltran.store.get_default_db_path", lambda: db_path)
+
+    plan = TaskPlan(mode=ExecutionMode.QUICK, reasoning="hızlı test")
+    report = ExecutionReport(
+        run_id="replay-run-456",
+        task_prompt="Test istemi",
+        mode=ExecutionMode.QUICK,
+        plan=plan,
+        executions=[],
+        final_summary="İlk çalıştırma özeti",
+    )
+    store.save_report(report)
+
+    # Mock execute_plan
+    async def fake_execute(
+        self: object, prompt: str, plan_arg: TaskPlan, **kwargs: object
+    ) -> ExecutionReport:
+        del self, kwargs
+        return ExecutionReport(
+            run_id="replayed-789",
+            task_prompt=prompt,
+            mode=plan_arg.mode,
+            plan=plan_arg,
+            executions=[],
+            final_summary="Yeniden oynatma başarılı",
+        )
+
+    monkeypatch.setattr("voltran.engine.ExecutionEngine.execute_plan", fake_execute)
+
+    result = runner.invoke(app, ["replay", "replay-run-456", "--explain"])
+    assert result.exit_code == 0
+    assert "Yeniden Oynatılan Çalıştırma" in result.stdout
+    assert "Yeniden oynatma başarılı" in result.stdout
+
+    # JSON çıktısı ile
+    json_result = runner.invoke(app, ["replay", "replay-run-456", "--json"])
+    assert json_result.exit_code == 0
+    payload = json.loads(json_result.stdout)
+    assert payload["run_id"] == "replayed-789"
+
+
+def test_cancel_command(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    from voltran.models import ExecutionMode, ExecutionReport, TaskPlan
+    from voltran.store import RunStore
+
+    monkeypatch.chdir(tmp_path)
+    db_path = tmp_path / "voltran.db"
+    store = RunStore(db_path)
+    monkeypatch.setattr("voltran.store.get_default_db_path", lambda: db_path)
+
+    # 1. Olmayan çalıştırma
+    result = runner.invoke(app, ["cancel", "missing-id"])
+    assert result.exit_code == 1
+    assert "Çalıştırma bulunamadı" in result.stdout
+
+    # 2. Tamamlanmış (aktif olmayan) çalıştırma
+    plan = TaskPlan(mode=ExecutionMode.QUICK, reasoning="bitti")
+    report = ExecutionReport(
+        run_id="completed-id",
+        task_prompt="Tamamlandı",
+        mode=ExecutionMode.QUICK,
+        plan=plan,
+        executions=[],
+        final_summary="Bitti",
+    )
+    store.save_report(report)
+    result = runner.invoke(app, ["cancel", "completed-id"])
+    assert result.exit_code == 0
+    assert "zaten aktif değil" in result.stdout
+
+    # 3. Aktif çalıştırma (mock os.kill ile)
+    store.register_active_run("active-id", pid=999999, mode="quick", prompt="aktif görev")
+
+    def fake_kill(pid: int, sig: int) -> None:
+        del pid, sig
+
+    monkeypatch.setattr("os.kill", fake_kill)
+    if hasattr(os, "killpg"):
+
+        def fake_killpg(pgid: int, sig: int) -> None:
+            del pgid, sig
+
+        monkeypatch.setattr("os.killpg", fake_killpg)
+
+    result = runner.invoke(app, ["cancel", "active-id"])
+    assert result.exit_code == 0
+    assert "başarıyla iptal edildi" in result.stdout
+    assert store.get_active_run("active-id") is None
+
+
+def test_run_keyboard_interrupt(monkeypatch: MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    async def raise_interrupt(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr("voltran.engine.ExecutionEngine.execute_plan", raise_interrupt)
+
+    result = runner.invoke(app, ["run", "kesilecek görev", "--dry-run"])
+    assert result.exit_code == 130
+    assert "kullanıcı tarafından iptal edildi" in result.stdout

@@ -346,6 +346,9 @@ def run(
     try:
         engine = ExecutionEngine()
         report = asyncio.run(engine.execute_plan(prompt, plan, dry_run=dry_run))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Çalıştırma kullanıcı tarafından iptal edildi.[/yellow]")
+        raise typer.Exit(code=130) from None
     finally:
         if file and allow_writes:
             lock_mgr.release(file, lock_holder)
@@ -587,3 +590,129 @@ def dashboard(
             view.run_live(refresh_rate=refresh_rate, console=console)
         except KeyboardInterrupt:
             console.print("\n[dim]Gösterge paneli kapatıldı.[/dim]")
+
+
+@app.command()
+def replay(
+    run_id: Annotated[
+        str,
+        typer.Argument(help="Yeniden oynatılacak çalıştırmanın kimliği (run_id)."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Sonucu Markdown yerine ham JSON olarak yazdır."),
+    ] = False,
+    explain: Annotated[
+        bool,
+        typer.Option("--explain", help="Plan ve rol dağılımını çalıştırmadan önce açıkla."),
+    ] = False,
+    output: Annotated[
+        Path | None,
+        typer.Option("-o", "--output", help="Sonuç raporunun kaydedileceği Markdown dosyası."),
+    ] = None,
+) -> None:
+    """Kaydedilmiş bir görevi aynı plan ve politikayla yeniden oynat (FR-12)."""
+
+    from rich.markdown import Markdown
+
+    from voltran.engine import ExecutionEngine
+    from voltran.reporter import Reporter
+    from voltran.store import RunStore
+
+    store = RunStore()
+    stored = store.get_run(run_id)
+    if stored is None:
+        console.print(f"[red]Çalıştırma bulunamadı:[/red] {run_id}")
+        raise typer.Exit(code=1)
+
+    if stored.plan is None:
+        console.print(
+            f"[yellow]Bu çalıştırma ({run_id}) eski formatta kaydedilmiş, "
+            "plan bilgisi içermiyor ve yeniden oynatılamaz.[/yellow]"
+        )
+        raise typer.Exit(code=1)
+
+    if explain and not json_output:
+        console.print(f"[bold cyan]Yeniden Oynatılan Çalıştırma:[/bold cyan] {run_id}")
+        console.print(f"[bold cyan]Planlanan Mod:[/bold cyan] {stored.plan.mode.value.upper()}")
+        console.print(f"[bold cyan]Seçim Gerekçesi:[/bold cyan] {stored.plan.reasoning}")
+        console.print(f"[dim]İstem: {stored.prompt}[/dim]\n")
+
+    engine = ExecutionEngine()
+    try:
+        report = asyncio.run(engine.execute_plan(stored.prompt, stored.plan))
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Yeniden oynatma kullanıcı tarafından iptal edildi.[/yellow]")
+        raise typer.Exit(code=130) from None
+
+    store.save_report(report)
+
+    if json_output:
+        typer.echo(Reporter.to_json(report))
+    else:
+        console.print(Markdown(Reporter.to_markdown(report)))
+
+    if output is not None:
+        output.write_text(Reporter.to_markdown(report), encoding="utf-8")
+        console.print(f"\n[green]Rapor kaydedildi:[/green] {output}")
+
+
+@app.command()
+def cancel(
+    run_id: Annotated[
+        str,
+        typer.Argument(help="İptal edilecek çalıştırmanın kimliği (run_id)."),
+    ],
+) -> None:
+    """Devam eden bir çalıştırmayı ve alt süreçlerini sonlandır (FR-15)."""
+
+    import os
+    import signal
+    import time
+    from contextlib import suppress
+
+    from voltran.store import RunStore
+
+    store = RunStore()
+    active = store.get_active_run(run_id)
+    if active is None:
+        stored = store.get_run(run_id)
+        if stored:
+            console.print(
+                f"[yellow]Çalıştırma zaten aktif değil:[/yellow] {run_id} (Durum: {stored.status})"
+            )
+            return
+        console.print(f"[red]Çalıştırma bulunamadı:[/red] {run_id}")
+        raise typer.Exit(code=1)
+
+    pid = active["pid"]
+    terminated = False
+    try:
+        if os.name == "posix":
+            with suppress(ProcessLookupError):
+                pgid = os.getpgid(pid)
+                os.killpg(pgid, signal.SIGTERM)
+        with suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGTERM)
+
+        for _ in range(10):
+            try:
+                os.kill(pid, 0)
+                time.sleep(0.1)
+            except ProcessLookupError:
+                terminated = True
+                break
+
+        if not terminated:
+            if os.name == "posix":
+                with suppress(ProcessLookupError):
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+            with suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+    except Exception as exc:
+        console.print(f"[red]İptal işlemi sırasında hata oluştu:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    store.unregister_active_run(run_id)
+    store.mark_run_cancelled(run_id)
+    console.print(f"[green]Çalıştırma başarıyla iptal edildi:[/green] {run_id}")
