@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -58,6 +59,57 @@ def test_antigravity_normalizes_stream_json_result() -> None:
     assert result.summary == "Ortak cevap"
 
 
+def test_provider_prompt_requests_complete_json_contract() -> None:
+    adapter = _PythonAdapter("pass")
+    prompt = adapter.compose_input(ProviderTask(prompt="test"), None)
+
+    for field in (
+        "summary",
+        "claims",
+        "evidence",
+        "uncertainties",
+        "risks",
+        "artifacts",
+        "status",
+    ):
+        assert field in prompt
+
+
+def test_provider_normalizes_fenced_structured_result() -> None:
+    raw = """Yanıt:\n```json
+{"summary":"sonuç","claims":["iddia"],"evidence":["pytest geçti"],
+"uncertainties":["sürüm"],"risks":["timeout"],"artifacts":["report.md"],
+"status":"success"}
+```"""
+
+    result = _PythonAdapter("pass").normalize_result(raw)
+
+    assert result.summary == "sonuç"
+    assert result.claims == ["iddia"]
+    assert result.evidence == ["pytest geçti"]
+    assert result.uncertainties == ["sürüm"]
+    assert result.risks == ["timeout"]
+    assert result.artifacts == ["report.md"]
+
+
+def test_antigravity_normalizes_structured_response_contract() -> None:
+    response = {
+        "summary": "sonuç",
+        "claims": ["iddia"],
+        "evidence": ["kanıt"],
+        "uncertainties": [],
+        "risks": [],
+        "artifacts": [],
+        "status": "success",
+    }
+    raw = json.dumps({"event": "result", "result": {"response": json.dumps(response)}})
+
+    result = AntigravityAdapter(finder=_finder).normalize_result(raw)
+
+    assert result.summary == "sonuç"
+    assert result.claims == ["iddia"]
+
+
 class _PythonAdapter(CliProviderAdapter):
     key = "fake"
     display_name = "Fake"
@@ -69,6 +121,9 @@ class _PythonAdapter(CliProviderAdapter):
 
     def capabilities(self) -> ProviderCapabilities:
         return ProviderCapabilities()
+
+    def compose_input(self, task: ProviderTask, context: str | None) -> str:
+        return self._compose_input(task, context)
 
     def _build_command(
         self,

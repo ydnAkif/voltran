@@ -71,7 +71,7 @@ class AntigravityAdapter(CliProviderAdapter):
             result = cast(dict[str, object], result_obj)
             response = result.get("response")
             if isinstance(response, str) and response.strip():
-                return TaskResult(summary=response.strip(), status="success")
+                return super().normalize_result(response)
             error = result.get("error")
             if isinstance(error, str) and error.strip():
                 return TaskResult(summary=error.strip(), status="error")

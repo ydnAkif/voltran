@@ -125,7 +125,14 @@ class CliProviderAdapter(ABC):
         parts: list[str] = [
             "YALITILMIŞ GÖREV: Yalnızca aşağıdaki ana görev ve açıkça verilen bağlam üzerinde "
             "çalış. Önceki oturum, hafıza, başka proje veya çalışma alanlarından gelen ilgisiz "
-            "bilgileri kullanma."
+            "bilgileri kullanma.",
+            (
+                "ÇIKTI SÖZLEŞMESİ: Yalnızca geçerli bir JSON nesnesi döndür. "
+                "Zorunlu alanlar ve türleri: summary=string; claims=string[]; "
+                "evidence=string[]; uncertainties=string[]; risks=string[]; "
+                "artifacts=string[]; status=string. Alanları atlama; bilgi yoksa "
+                "boş liste kullan."
+            ),
         ]
         if task.role:
             parts.append(f"GÖREVDEKİ ROLÜNÜZ: {task.role}")
@@ -286,12 +293,16 @@ class CliProviderAdapter(ABC):
 
     def normalize_result(self, raw_output: str) -> TaskResult:
         text = raw_output.strip()
-        try:
-            payload = json.loads(text)
-            if isinstance(payload, dict):
-                return TaskResult.model_validate(payload)
-        except (json.JSONDecodeError, ValidationError):
-            pass
+        decoder = json.JSONDecoder()
+        for index, character in enumerate(text):
+            if character != "{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(text[index:])
+                if isinstance(payload, dict):
+                    return TaskResult.model_validate(payload)
+            except (json.JSONDecodeError, ValidationError):
+                continue
         return TaskResult(summary=text, status="success")
 
     def _execution_error(self, run_id: str, started: float, message: str) -> ProviderExecution:
