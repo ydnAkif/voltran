@@ -328,6 +328,27 @@ uv run pytest -v
 ```
 
 
+## Neden bu projeye ihtiyaç var
+
+VOLTRAN, düzenlediği üç modelin kendisi tarafından yazıldı. Geliştirme sırasında tekrarlayan
+tek bir örüntü çıktı: model *"tamamlandı, testler geçiyor"* dedi, CI yeşildi, `pyright` strict
+sıfır hata verdi — ve kod yine de yanlıştı.
+
+**16 gerçek hata**, hiçbiri testler tarafından yakalanmadı. Hepsi kod gerçek bir şeye karşı
+çalıştırıldığında ortaya çıktı:
+
+| Yeşil CI ile gönderilen | Sonuç |
+| --- | --- |
+| Maskeleme katmanı kaynak kodu bozuyordu | Model bozulmuş kodu inceliyor, fark etmiyordu |
+| `voltran cancel` bayat bir PID'e sinyal gönderiyordu | Makinedeki **ilgisiz bir süreci öldürdü** |
+| Kıyaslama paketi her zaman "başarılı" diyordu | Hiçbir başarısızlık raporlanamıyordu |
+| `DB_PASSWORD=...` hiç maskelenmiyordu | Parola hem modele hem yerel geçmişe düz metin gidiyordu |
+
+Tamamı, düzelten commit'leriyle birlikte: **[docs/FINDINGS.md](docs/FINDINGS.md)**
+
+Sebep test eksikliği değildi — kapsam %83–89 arasındaydı. Sebep şu: bir model kendi işini
+kendi testleriyle doğrulayınca, aynı yanlış varsayımı iki kez yazmış oluyor.
+
 ## Güvenlik sınırı
 
 VOLTRAN, bir dosyayı birden fazla sağlayıcıya gönderdiğinde veri fiilen birden fazla hizmetle paylaşılmış olur. Finansal, sağlıkla ilgili veya kimlik bilgisi içeren girdilerde bugün geçerli olan davranış şudur:
