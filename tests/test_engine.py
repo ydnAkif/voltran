@@ -585,3 +585,81 @@ def test_engine_applies_context_budget_before_reaching_provider(tmp_path: Path) 
     assert sent is not None
     assert len(sent) <= 2_000
     assert "gönderilmedi" in sent
+
+
+def test_isolated_run_reads_context_from_the_worktree_not_the_dirty_disk(
+    tmp_path: Path,
+) -> None:
+    """Model, düzenlediği sürümü okumalı; aksi hâlde yaması başka bir koda ait olur."""
+    import subprocess as _subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (
+        ("init",),
+        ("config", "user.email", "tests@voltran.invalid"),
+        ("config", "user.name", "VOLTRAN Tests"),
+    ):
+        _subprocess.run(("git", *args), cwd=repo, check=True, capture_output=True)
+    target = repo / "main.cpp"
+    target.write_text("// COMMIT EDILMIS\n", encoding="utf-8")
+    _subprocess.run(("git", "add", "-A"), cwd=repo, check=True, capture_output=True)
+    _subprocess.run(("git", "commit", "-m", "ilk"), cwd=repo, check=True, capture_output=True)
+    target.write_text("// COMMIT EDILMEMIS\n", encoding="utf-8")
+
+    seen: dict[str, str | None] = {}
+
+    class _ContextSpy:
+        key = "codex"
+
+        def availability(self) -> bool:
+            return True
+
+        def capabilities(self) -> ProviderCapabilities:
+            return ProviderCapabilities(file_access=True)
+
+        async def health_check(self) -> ProviderHealth:
+            return ProviderHealth(provider=self.key, available=True, message="ok")
+
+        async def cancel(self, run_id: str) -> bool:
+            return True
+
+        def normalize_result(self, raw_output: str) -> TaskResult:
+            return TaskResult(summary=raw_output, status="success")
+
+        async def execute(
+            self,
+            task: ProviderTask,
+            context: str | None,
+            policy: ExecutionPolicy,
+        ) -> ProviderExecution:
+            seen["context"] = context
+            seen["worktree"] = (task.working_directory / "main.cpp").read_text(encoding="utf-8")
+            return ProviderExecution(
+                run_id=task.task_id,
+                provider=self.key,
+                status=ExecutionStatus.SUCCESS,
+                duration_ms=1,
+                result=TaskResult(summary="model özeti", status="success"),
+            )
+
+    plan = TaskPlan(
+        mode=ExecutionMode.EXPERT,
+        reasoning="test",
+        subtasks=[SubTask(role="uzman", purpose="", assigned_provider="codex")],
+        context_file=target,
+        policy=ExecutionPolicy(allow_writes=True),
+    )
+    registry: dict[str, ProviderAdapter] = {"codex": _ContextSpy()}
+    engine = ExecutionEngine(registry=registry)
+    report = asyncio.run(engine.execute_plan("incele", plan))
+
+    assert seen["context"] is not None
+    assert "COMMIT EDILMIS" in seen["context"]
+    assert "COMMIT EDILMEMIS" not in seen["context"]
+    assert seen["context"].strip() == (seen["worktree"] or "").strip()
+
+    # Uyarı sonraki adım önerisinde; modelin özeti kirletilmez.
+    assert report.final_summary == "model özeti"
+    assert report.next_step_recommendation is not None
+    assert "commit edilmemiş" in report.next_step_recommendation

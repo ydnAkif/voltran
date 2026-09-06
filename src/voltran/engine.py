@@ -119,6 +119,7 @@ class ExecutionEngine:
         self._current_session: CollaborationSession | None = None
         self._running_tasks: set[str] = set()
         self.last_workspace_outcome: WorkspaceOutcome | None = None
+        self.last_workspace_warning: str | None = None
 
     async def cancel_run(self, run_id: str | None = None) -> bool:
         """Etkin çalışmayı, adaptör alt süreçlerini ve hcom oturumunu sonlandırır."""
@@ -152,6 +153,7 @@ class ExecutionEngine:
         started = time.monotonic()
         run_id = uuid4().hex[:12]
         self.last_workspace_outcome = None
+        self.last_workspace_warning = None
         isolated_workspace: IsolatedGitWorkspace | None = None
         working_directory = plan.context_file.parent if plan.context_file else Path.cwd()
 
@@ -159,6 +161,7 @@ class ExecutionEngine:
             try:
                 isolated_workspace = IsolatedGitWorkspace(working_directory, run_id)
                 working_directory = isolated_workspace.working_directory
+                self.last_workspace_warning = isolated_workspace.dirty_warning()
             except WorkspaceIsolationError as exc:
                 return self._workspace_failure_report(run_id, prompt, plan, started, str(exc))
 
@@ -166,9 +169,17 @@ class ExecutionEngine:
         # yapar; buradaki yakalama, kütüphane olarak kullanımda çökmeyi önler.
         context: str | None = None
         if plan.context_file is not None:
+            # İzolasyon etkinken bağlam, worktree'deki kopyadan okunur. Aksi hâlde
+            # model diskteki commit edilmemiş sürümü okur ama HEAD sürümünü düzenler;
+            # ürettiği yama, akıl yürüttüğü koda ait olmaz.
+            context_source = plan.context_file
+            if isolated_workspace is not None:
+                translated = isolated_workspace.translate(plan.context_file)
+                if translated is not None:
+                    context_source = translated
             try:
                 scope = load_context(
-                    plan.context_file,
+                    context_source,
                     max_chars=plan.policy.max_context_chars,
                     line_range=plan.policy.context_line_range,
                 )
@@ -533,14 +544,15 @@ class ExecutionEngine:
             total_duration_ms=execution.duration_ms,
         )
 
-    @staticmethod
-    def _attach_workspace_outcome(report: ExecutionReport, outcome: WorkspaceOutcome) -> None:
+    def _attach_workspace_outcome(self, report: ExecutionReport, outcome: WorkspaceOutcome) -> None:
+        # Uyarı, modelin ürettiği özete karışmaz; sonraki adım önerisine yazılır.
+        warning = f"⚠ {self.last_workspace_warning}\n\n" if self.last_workspace_warning else ""
         if outcome.changed:
             detail = (
                 f"Yazma işlemi izole worktree'de tutuldu: {outcome.worktree}. "
                 f"İnceleme yaması: {outcome.patch_file}. Ana çalışma ağacına uygulanmadı."
             )
-            report.next_step_recommendation = detail
+            report.next_step_recommendation = f"{warning}{detail}"
             for execution in report.executions:
                 if execution.result is not None:
                     execution.result.metadata["isolated_worktree"] = str(outcome.worktree)
@@ -548,11 +560,13 @@ class ExecutionEngine:
                     execution.result.metadata["base_revision"] = outcome.base_revision
         elif outcome.cleanup_error:
             report.next_step_recommendation = (
-                f"İzole worktree temizlenemedi ve inceleme için korundu: {outcome.worktree}. "
-                f"Hata: {outcome.cleanup_error}"
+                f"{warning}İzole worktree temizlenemedi ve inceleme için korundu: "
+                f"{outcome.worktree}. Hata: {outcome.cleanup_error}"
             )
         else:
-            report.next_step_recommendation = "İzole çalışma ağacında dosya değişikliği oluşmadı."
+            report.next_step_recommendation = (
+                f"{warning}İzole çalışma ağacında dosya değişikliği oluşmadı."
+            )
 
     @staticmethod
     def _workspace_failure_report(

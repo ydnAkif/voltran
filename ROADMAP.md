@@ -26,7 +26,7 @@ altındadır; aşağıdaki "eksik" sütunu yeni iş seçiminde esas alınır.
 | Council | Kısmi | hcom oturumu, farklı sağlayıcılar, iki tur ve bağlam bütçesi, açık uzlaşma/itiraz kaydı, izin listesine uyum | Ajanların birbirinin katkısını gerçekten gördüğünün ve yanıtladığının olay zincirinden doğrulanması; kısmi durum sözlüğü |
 | Router | Kısmi | Yetenek, erişilebilirlik, moda göre puanlama ve doğrulanan sağlayıcı izin listesi | Kota, maliyet, gecikme ve oturum sağlığı |
 | Gizlilik | Tamamlandı | Secret/PII maskeleme (giden ve kayıt yolu), hassasiyet sınıflandırması, hassas görevde otomatik council genişlemesinin engellenmesi, sağlayıcı izin listesi, dry-run veri paylaşım önizlemesi ve bağlam bütçesi/bölüm seçimi | SEC-01..SEC-05 karşılandı; kalan gizlilik işi yok |
-| Yazma güvenliği | Kısmi | Atomik dosya kilidi, council'da tek yazıcı, detached Git worktree, binary inceleme patch'i; ana checkout'a otomatik uygulama yok | Üçüncü taraf CLI'lar için worktree dışına erişimi OS düzeyinde engelleyen ortak sandbox yok |
+| Yazma güvenliği | Kısmi | Atomik dosya kilidi, council'da tek yazıcı, `.git` altında detached Git worktree, binary inceleme patch'i, kirli çalışma ağacı uyarısı, bağlamın worktree'den okunması ve `voltran worktrees --prune` temizliği; ana checkout'a otomatik uygulama yok | Üçüncü taraf CLI'lar için worktree dışına erişimi OS düzeyinde engelleyen ortak sandbox yok |
 | Raporlama | Kısmi | Markdown/JSON, rol, sağlayıcı, durum ve council güven alanları | Kanıtlar ve isteğe bağlı ham uzman çıktıları |
 | Geçmiş | Tamamlandı | Maskelenmiş SQLite özeti, son çalışmalar ve `voltran replay <run_id>` (FR-12) | - |
 | Benchmark | Kısmi | Üç sabit senaryo; durum, süre ve uzlaşma kaydı | Altın cevaplar, kalite değerlendirmesi ve karşılaştırmalı ölçüm |

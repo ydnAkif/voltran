@@ -76,7 +76,7 @@ Tek ana model ve gerekirse bir hızlı yardımcı kullanır. Küçük kod deği�
 
 ### `expert` — Voltran Uzman
 
-Komutan, göreve en uygun bir veya iki uzmanı çağırır. Kodlama, teknik teşhis ve kapsamlı belge analizi için varsayılan mod.
+Komutan göreve en uygun uzmanı çağırır. Kodlama, teknik teşhis ve kapsamlı belge analizi için varsayılan mod. (Bugün tek uzman çalışır; çok uzmanlı paralel yürütme FR-07 ile planlanıyor.)
 
 ### `council` — Voltran Konsey
 
@@ -101,7 +101,7 @@ Metin ekibi görsel brifi hazırlar; uygun görsel sağlayıcısı üretim veya 
    - Oturum gözetmeni ve uzlaşma denetimi (`CollaborationSupervisor`)
 4. Sağlayıcı erişilebilirlik ve oturum kontrolü (`voltran doctor`).
 5. `quick`, `expert` ve `council` modları.
-6. Paralel alt görev çalıştırma, zaman aşımı ve hata izolasyonu.
+6. Zaman aşımı, iptal (`voltran cancel`) ve sağlayıcı bazlı hata izolasyonu. (Paralel alt görev yürütme henüz yok — bkz. [ROADMAP.md](ROADMAP.md) FR-07.)
 7. JSON tabanlı ortak görev/yanıt sözleşmesi.
 8. Yerel SQLite çalışma geçmişi ve denetim kaydı.
 9. Hassas veri ve PII maskeleme katmanı (`sanitizer`).
@@ -289,10 +289,26 @@ blind = false
 > anahtar veya yanlış tür de sessizce yok sayılmaz, hata verir — yazım hatası olan bir ayarın
 > uygulandığını sanmayasınız diye.
 
-`--write` etkin olduğunda sağlayıcılar aktif checkout yerine HEAD commitinden oluşturulan geçici,
-detached Git worktree içinde çalışır. Ana çalışma ağacındaki kirli değişiklikler göreve taşınmaz ve
-model değişiklikleri otomatik uygulanmaz. Değişiklik oluşursa rapor, inceleme worktree'sini ve
-`changes.patch` dosyasını gösterir; doğrulama kanıtı aynı dizindeki `verification.txt` içindedir.
+`--write` etkin olduğunda sağlayıcılar aktif checkout yerine HEAD commitinden oluşturulan
+detached bir Git worktree içinde çalışır. Model değişiklikleri ana çalışma ağacına **otomatik
+uygulanmaz**; değişiklik oluşursa rapor inceleme worktree'sini ve `changes.patch` dosyasını
+gösterir, doğrulama kanıtı aynı dizindeki `verification.txt` içindedir.
+
+Bilmeniz gereken üç davranış:
+
+| Durum | Davranış |
+| --- | --- |
+| **Git deposu gerekir** | `--write`, Git deposu olmayan bir dizinde çalışmaz ve kontrollü hata verir. İzolasyon worktree'ye dayandığı için depo dışında güvenli yazma sağlanamaz. |
+| **Commit edilmemiş değişiklikler göreve girmez** | Worktree HEAD'den açılır. Çalışma ağacınız kirliyse VOLTRAN uyarır ve modelin hangi sürümü gördüğünü söyler; bağlam dosyası da worktree kopyasından okunur, böylece model **düzenlediği** kodu okur. Modelin güncel kodunuzu görmesi için önce commit veya stash yapın. |
+| **İnceleme worktree'leri korunur** | Değişiklik üreten her çalıştırma, incelemeniz için worktree'yi `.git/voltran/worktrees/<run_id>` altında saklar. Çalışma ağacınızı kirletmez ve yeniden başlatmada silinmez. |
+
+```bash
+# Korunan inceleme worktree'lerini ve yamalarını listele:
+uv run voltran worktrees
+
+# İncelemesi biten worktree'leri temizle (Git kayıtları da düşer):
+uv run voltran worktrees --prune
+```
 
 ### 🔜 Geliştirilmekte Olan Komutlar
 ```bash

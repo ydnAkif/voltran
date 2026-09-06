@@ -440,6 +440,50 @@ def config(
 
 
 @app.command()
+def worktrees(
+    prune: Annotated[
+        bool,
+        typer.Option("--prune", help="Korunmuş inceleme worktree'lerini kaldır."),
+    ] = False,
+) -> None:
+    """`--write` çalıştırmalarından korunan inceleme worktree'lerini listele veya temizle."""
+
+    from voltran.workspace import (
+        WorkspaceIsolationError,
+        list_review_worktrees,
+        prune_review_worktrees,
+    )
+
+    try:
+        if prune:
+            removed = prune_review_worktrees()
+            console.print(f"[green]{removed} inceleme worktree'si kaldırıldı.[/green]")
+            return
+        reviews = list_review_worktrees()
+    except WorkspaceIsolationError as exc:
+        console.print(f"[red]İnceleme worktree'lerine erişilemedi:[/red] {exc}")
+        console.print("[dim]Bu komut bir Git deposu içinde çalıştırılmalıdır.[/dim]")
+        raise typer.Exit(code=1) from exc
+
+    if not reviews:
+        console.print("[dim]Korunmuş inceleme worktree'si yok.[/dim]")
+        return
+
+    table = Table(title="Korunmuş İnceleme Worktree'leri", show_lines=False)
+    table.add_column("Çalışma ID", no_wrap=True)
+    table.add_column("Worktree")
+    table.add_column("İnceleme yaması")
+    for review in reviews:
+        table.add_row(
+            review.run_id,
+            str(review.worktree),
+            str(review.patch_file) if review.patch_file else "-",
+        )
+    console.print(table)
+    console.print("[dim]Temizlemek için: voltran worktrees --prune[/dim]")
+
+
+@app.command()
 def unlock(
     file: Annotated[
         Path | None,
